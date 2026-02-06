@@ -1,0 +1,191 @@
+{
+    "name": "geoshield-ai",
+    "version": "3.2.0",
+    "description": "Enterprise-grade AI-powered landslide prediction and early warning system with advanced geospatial analytics",
+    "main": "index.js",
+    "private": true,
+    "scripts": {
+        "dev": "concurrently \"npm:dev:*\"",
+        "dev:client": "cd client && npm run dev",
+        "dev:server": "cd server && npm run dev",
+        "dev:alert": "cd alert-service && npm run dev",
+        "dev:admin": "cd admin-service && npm run dev",
+        "dev:gateway": "cd gateway && npm run dev",
+        "dev:ml": "cd ml-service && uvicorn app.main:app --reload --host 0.0.0.0 --port 8001",
+        "dev:data": "cd data-service && python src/main.py",
+        "dev:gis": "cd gis-service && uvicorn src.main:app --reload --host 0.0.0.0 --port 8002",
+        "dev:all": "concurrently \"npm:dev:client\" \"npm:dev:server\" \"npm:dev:ml\" \"npm:dev:data\" \"npm:dev:alert\" \"npm:dev:gis\" \"npm:dev:admin\" \"npm:dev:gateway\"",
+        "build": "npm run build:client && npm run build:server",
+        "build:client": "cd client && npm run build",
+        "build:server": "cd server && npm run build",
+        "build:all": "npm run build:client && npm run build:server && npm run build:services",
+        "build:services": "cd alert-service && npm run build && cd ../admin-service && npm run build && cd ../gateway && npm run build",
+        "start": "npm run start:server",
+        "start:server": "cd server && npm start",
+        "start:prod": "docker-compose -f docker-compose.prod.yml up -d",
+        "stop:prod": "docker-compose -f docker-compose.prod.yml down",
+        "test": "npm run test:client && npm run test:server && npm run test:ml",
+        "test:client": "cd client && npm test",
+        "test:server": "cd server && npm test",
+        "test:ml": "cd ml-service && pytest",
+        "test:services": "cd alert-service && npm test && cd ../admin-service && npm test",
+        "test:coverage": "npm run test:client -- --coverage && npm run test:server -- --coverage",
+        "test:e2e": "npm run test:e2e:client",
+        "test:e2e:client": "cd client && npm run test:e2e",
+        "lint": "npm run lint:client && npm run lint:server && npm run lint:python",
+        "lint:client": "cd client && npm run lint",
+        "lint:server": "cd server && npm run lint",
+        "lint:services": "cd alert-service && npm run lint && cd ../admin-service && npm run lint && cd ../gateway && npm run lint",
+        "lint:python": "cd ml-service && pylint app && cd ../data-service && pylint src && cd ../gis-service && pylint src",
+        "lint:fix": "npm run lint:client -- --fix && npm run lint:server -- --fix",
+        "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md,css,scss}\"",
+        "format:check": "prettier --check \"**/*.{js,jsx,ts,tsx,json,md,css,scss}\"",
+        "format:python": "cd ml-service && black . && cd ../data-service && black . && cd ../gis-service && black .",
+        "docker:build": "docker-compose build",
+        "docker:up": "docker-compose up -d",
+        "docker:down": "docker-compose down",
+        "docker:logs": "docker-compose logs -f",
+        "docker:clean": "docker-compose down -v --remove-orphans",
+        "docker:prod": "docker-compose -f docker-compose.prod.yml up -d --build",
+        "k8s:deploy": "kubectl apply -f kubernetes/",
+        "k8s:delete": "kubectl delete -f kubernetes/",
+        "k8s:status": "kubectl get all -n geoshield",
+        "db:seed": "node scripts/database/seed.js",
+        "db:migrate": "node scripts/database/migrate.js",
+        "db:backup": "bash scripts/database/backup.sh",
+        "ml:train": "cd ml-service && python scripts/ml/train-models.py",
+        "ml:evaluate": "cd ml-service && python scripts/ml/evaluate-models.py",
+        "ml:export": "cd ml-service && python scripts/ml/export-models.py",
+        "install:all": "npm install && npm run install:services && npm run install:python",
+        "install:services": "cd client && npm install && cd ../server && npm install && cd ../alert-service && npm install && cd ../admin-service && npm install && cd ../gateway && npm install",
+        "install:python": "cd ml-service && pip install -r requirements.txt && cd ../data-service && pip install -r requirements.txt && cd ../gis-service && pip install -r requirements.txt",
+        "clean": "npm run clean:deps && npm run clean:build",
+        "clean:deps": "rm -rf node_modules client/node_modules server/node_modules alert-service/node_modules admin-service/node_modules gateway/node_modules",
+        "clean:build": "rm -rf client/dist client/build server/dist",
+        "setup": "npm run install:all && npm run setup:env && npm run setup:db",
+        "setup:env": "bash scripts/setup/copy-env-files.sh",
+        "setup:db": "bash scripts/setup/setup-database.sh",
+        "setup:secrets": "bash scripts/setup/generate-secrets.sh",
+        "deploy:dev": "bash scripts/deployment/deploy-dev.sh",
+        "deploy:staging": "bash scripts/deployment/deploy-staging.sh",
+        "deploy:prod": "bash scripts/deployment/deploy-prod.sh",
+        "monitor:prometheus": "open http://localhost:9090",
+        "monitor:grafana": "open http://localhost:3001",
+        "monitor:kibana": "open http://localhost:5601",
+        "docs:serve": "cd docs && python -m http.server 8080",
+        "docs:build": "npm run docs:api && npm run docs:ml",
+        "docs:api": "swagger-cli bundle docs/api/openapi.yaml -o docs/api/openapi-bundle.yaml",
+        "docs:ml": "cd ml-service && pdoc --html --output-dir ../docs/ml app",
+        "security:audit": "npm audit && pip-audit -r ml-service/requirements.txt",
+        "security:scan": "trivy fs .",
+        "security:snyk": "snyk test",
+        "perf:test": "artillery run tests/performance/load-test.yml",
+        "perf:report": "lighthouse http://localhost:3000 --output html --output-path ./reports/lighthouse.html",
+        "release": "standard-version",
+        "release:major": "standard-version --release-as major",
+        "release:minor": "standard-version --release-as minor",
+        "release:patch": "standard-version --release-as patch",
+        "precommit": "lint-staged",
+        "prepare": "husky install"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/geoshield-ai/geoshield.git"
+    },
+    "keywords": [
+        "landslide",
+        "prediction",
+        "machine-learning",
+        "geospatial",
+        "gis",
+        "disaster-management",
+        "early-warning",
+        "microservices",
+        "mern-stack",
+        "ai",
+        "deep-learning",
+        "risk-analytics",
+        "remote-sensing",
+        "satellite-imagery"
+    ],
+    "author": "GeoShield AI Team <team@geoshield.ai>",
+    "license": "SEE LICENSE IN LICENSE",
+    "bugs": {
+        "url": "https://github.com/geoshield-ai/geoshield/issues"
+    },
+    "homepage": "https://geoshield.ai",
+    "engines": {
+        "node": ">=18.0.0",
+        "npm": ">=9.0.0",
+        "python": ">=3.9.0"
+    },
+    "devDependencies": {
+        "@commitlint/cli": "^18.4.3",
+        "@commitlint/config-conventional": "^18.4.3",
+        "artillery": "^2.0.3",
+        "concurrently": "^8.2.2",
+        "eslint": "^8.55.0",
+        "eslint-config-airbnb-base": "^15.0.0",
+        "eslint-config-prettier": "^9.1.0",
+        "eslint-plugin-import": "^2.29.1",
+        "eslint-plugin-prettier": "^5.0.1",
+        "husky": "^8.0.3",
+        "lint-staged": "^15.2.0",
+        "prettier": "^3.1.1",
+        "standard-version": "^9.5.0"
+    },
+    "dependencies": {
+        "dotenv": "^16.3.1",
+        "express": "^5.1.0"
+    },
+    "lint-staged": {
+        "*.{js,jsx,ts,tsx}": [
+            "eslint --fix",
+            "prettier --write"
+        ],
+        "*.{json,md,css,scss}": [
+            "prettier --write"
+        ],
+        "*.py": [
+            "black",
+            "pylint"
+        ]
+    },
+    "commitlint": {
+        "extends": [
+            "@commitlint/config-conventional"
+        ]
+    },
+    "standard-version": {
+        "types": [
+            {
+                "type": "feat",
+                "section": "Features"
+            },
+            {
+                "type": "fix",
+                "section": "Bug Fixes"
+            },
+            {
+                "type": "perf",
+                "section": "Performance Improvements"
+            },
+            {
+                "type": "refactor",
+                "section": "Code Refactoring"
+            },
+            {
+                "type": "docs",
+                "section": "Documentation"
+            },
+            {
+                "type": "test",
+                "section": "Tests"
+            },
+            {
+                "type": "chore",
+                "hidden": true
+            }
+        ]
+    }
+}

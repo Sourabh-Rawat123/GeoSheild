@@ -17,6 +17,46 @@ import numpy as np
 from pathlib import Path
 
 # Define functions that pickle expects (from model training)
+def adapt_weather_api(data):
+    """
+    Transform weather API data for model compatibility.
+    This function was used during model training and is required for unpickling.
+    """
+    if isinstance(data, dict):
+        # Convert dict to appropriate format if needed
+        return data
+    return data
+
+def adapt_earthquake_api(data):
+    """
+    Transform earthquake API data for model compatibility.
+    This function was used during model training and is required for unpickling.
+    """
+    if isinstance(data, dict):
+        # Convert dict to appropriate format if needed
+        return data
+    return data
+
+def adapt_elevation_api(data):
+    """
+    Transform elevation API data for model compatibility.
+    This function was used during model training and is required for unpickling.
+    """
+    if isinstance(data, dict):
+        # Convert dict to appropriate format if needed
+        return data
+    return data
+
+def adapt_soil_api(data):
+    """
+    Transform soil API data for model compatibility.
+    This function was used during model training and is required for unpickling.
+    """
+    if isinstance(data, dict):
+        # Convert dict to appropriate format if needed
+        return data
+    return data
+
 def model_inference(features):
     """
     Dummy inference function for unpickling compatibility.
@@ -40,7 +80,7 @@ def determine_final_risk(probability):
 
 # Configure paths to ml-service folder
 BASE_DIR = Path(__file__).parent.parent.parent
-MODEL_PATH = BASE_DIR / "ml-service" / "models" / "landslide_risk_pipeline (1).pkl"
+MODEL_PATH = BASE_DIR / "ml-service" / "models" / "landslide_risk_pipeline (2) (1).pkl"
 
 # CSV files for reference data
 EVENTS_CSV_PATH = BASE_DIR / "ml-service" / "datasets" / "landslide_events.csv"
@@ -51,7 +91,12 @@ STATE_STATS_CSV_PATH = BASE_DIR / "ml-service" / "datasets" / "state_landslide_s
 class LandslideMLPredictor:
     def __init__(self):
         self.model = None
+        self.scaler = None
         self.feature_names = None
+        self.adapters = None
+        self.inference_fn = None
+        self.risk_fn = None
+        self.metadata = None
         self.events_df = None
         self.district_df = None
         self.classification_df = None
@@ -68,29 +113,25 @@ class LandslideMLPredictor:
             # Check if it's a dict containing the model
             if isinstance(loaded, dict):
                 print(f"[DEBUG] Loaded pickle is a dict with keys: {list(loaded.keys())}", file=sys.stderr)
-                # Try common keys where model might be stored
-                if 'model' in loaded:
-                    self.model = loaded['model']
-                elif 'pipeline' in loaded:
-                    self.model = loaded['pipeline']
-                elif 'estimator' in loaded:
-                    self.model = loaded['estimator']
-                else:
-                    # Use the first value that looks like a model
-                    for key, value in loaded.items():
-                        if hasattr(value, 'predict_proba'):
-                            print(f"[DEBUG] Found model in key: {key}", file=sys.stderr)
-                            self.model = value
-                            break
-                    else:
-                        raise ValueError(f"Could not find model in dict. Keys: {list(loaded.keys())}")
-                        
-                # Store feature names if available
-                if 'features' in loaded:
-                    self.feature_names = loaded['features']
+                
+                # Extract all components from the dict
+                self.model = loaded.get('model')
+                self.scaler = loaded.get('scaler')
+                self.feature_names = loaded.get('features')
+                self.adapters = loaded.get('adapters', {})
+                self.inference_fn = loaded.get('inference_fn')
+                self.risk_fn = loaded.get('risk_fn')
+                self.metadata = loaded.get('metadata', {})
+                
+                if self.model is None:
+                    raise ValueError(f"No 'model' key found in pickle dict. Keys: {list(loaded.keys())}")
+                
+                if self.feature_names:
                     print(f"[DEBUG] Model expects {len(self.feature_names)} features: {self.feature_names}", file=sys.stderr)
-                else:
-                    self.feature_names = None
+                if self.scaler:
+                    print(f"[DEBUG] Scaler loaded: {type(self.scaler).__name__}", file=sys.stderr)
+                if self.metadata:
+                    print(f"[DEBUG] Metadata: {self.metadata}", file=sys.stderr)
             else:
                 self.model = loaded
                 self.feature_names = None
@@ -303,19 +344,24 @@ class LandslideMLPredictor:
                     'earthquake_count', 'max_earthquake_magnitude', 'soil_moisture',
                     'ndvi', 'distance_to_fault', 'population_density'
                 ]
-            
-            # Create feature vector from live API data
-            features = []
-            for feature_name in feature_list:
-                value = features_dict.get(feature_name, 0.0)
-                features.append(float(value))
+                
+                # Create feature vector from live API data
+                features = []
+                for feature_name in feature_list:
+                    value = features_dict.get(feature_name, 0.0)
+                    features.append(float(value))
             
             # DEBUG: Log feature values
-            print(f"[DEBUG] Input Features ({len(features)} total): {dict(zip(feature_list[:8], features[:8]))}", file=sys.stderr)
+            print(f"[DEBUG] Input Features ({len(features)} total): {dict(zip(feature_list[:min(8, len(feature_list))], features[:min(8, len(features))]))}", file=sys.stderr)
             print(f"[DEBUG] Rainfall 24h: {features_dict.get('rainfall_24h', 0)}, Elevation: {features_dict.get('elevation', 0)}, Slope: {features_dict.get('slope', 0)}", file=sys.stderr)
             
             # Convert to numpy array
             X = np.array([features])
+            
+            # Apply scaler if available
+            if self.scaler is not None:
+                X = self.scaler.transform(X)
+                print(f"[DEBUG] Features scaled using StandardScaler", file=sys.stderr)
             
             # Step 3: Run trained model from ml-service folder
             probability = float(self.model.predict_proba(X)[0][1])

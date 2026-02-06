@@ -176,12 +176,12 @@ class IntegratedMLService {
     calculateAPIScore(apiData) {
         let score = 0;
 
-        // Rainfall factor (40% of API score)
-        const rainfall72h = apiData.weather.rainfall72h;
-        if (rainfall72h > 100) score += 0.4;
-        else if (rainfall72h > 50) score += 0.3;
-        else if (rainfall72h > 20) score += 0.2;
-        else score += rainfall72h / 100 * 0.2;
+        // Rainfall factor (40% of API score) - Using 24h rainfall
+        const rainfall24h = apiData.weather.rainfall24h;
+        if (rainfall24h > 50) score += 0.4;          // Heavy rainfall (>50mm/24h)
+        else if (rainfall24h > 30) score += 0.3;     // Moderate rainfall (30-50mm)
+        else if (rainfall24h > 15) score += 0.2;     // Light-moderate rainfall (15-30mm)
+        else score += rainfall24h / 50 * 0.2;        // Proportional for light rain
 
         // Earthquake factor (30% of API score)
         if (apiData.seismic.maxMagnitude > 5.0) score += 0.3;

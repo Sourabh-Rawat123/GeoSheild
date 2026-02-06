@@ -13,6 +13,7 @@ const incidentRoutes = require('./routes/incidents');
 const adminRoutes = require('./routes/admin');
 const seedRoutes = require('./routes/seed');
 const errorHandler = require('./middleware/errorHandler');
+const modelRetrainingScheduler = require('./services/modelRetrainingScheduler');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -93,6 +94,12 @@ app.use(errorHandler);
 mongoose.connect(process.env.MONGODB_URI)
     .then(() => {
         logger.info('✓ MongoDB connected successfully');
+
+        // Start model retraining scheduler
+        if (process.env.ENABLE_AUTO_RETRAIN !== 'false') {
+            modelRetrainingScheduler.start();
+            logger.info('✓ Model retraining scheduler started');
+        }
 
         // Start server
         app.listen(PORT, () => {

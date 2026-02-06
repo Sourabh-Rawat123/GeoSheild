@@ -123,6 +123,70 @@ const historicalIncidents = [
         description: 'One of the worst landslide disasters, entire village buried under debris during heavy monsoon.',
         source: 'official',
         verified: true
+    },
+    // Incidents near Dehradun/Mussoorie area (for testing)
+    {
+        location: {
+            coordinates: [78.0644, 30.4598],
+            address: 'Mussoorie-Dehradun Road',
+            city: 'Mussoorie',
+            state: 'Uttarakhand',
+            country: 'India'
+        },
+        incidentDate: new Date('2023-09-15'),
+        severity: 'Moderate',
+        details: {
+            casualties: { deaths: 2, injuries: 8 },
+            damage: { housesDestroyed: 5, roadsBlocked: 2, estimatedCost: 6500000 },
+            area: { affectedAreaKm2: 1.1, volumeM3: 22000 }
+        },
+        triggers: { rainfall: 145, earthquake: false, humanActivity: false },
+        conditions: { slope: 41, soilType: 'Shale', vegetation: 'Forest', previousSlides: true },
+        description: 'Landslide on Mussoorie-Dehradun road blocked traffic for 48 hours during monsoon season.',
+        source: 'official',
+        verified: true
+    },
+    {
+        location: {
+            coordinates: [78.0422, 30.3265],
+            address: 'Rajpur Road',
+            city: 'Dehradun',
+            state: 'Uttarakhand',
+            country: 'India'
+        },
+        incidentDate: new Date('2024-08-22'),
+        severity: 'Minor',
+        details: {
+            casualties: { deaths: 0, injuries: 3 },
+            damage: { housesDestroyed: 2, roadsBlocked: 1, estimatedCost: 2500000 },
+            area: { affectedAreaKm2: 0.4, volumeM3: 8500 }
+        },
+        triggers: { rainfall: 95, earthquake: false, humanActivity: true },
+        conditions: { slope: 35, soilType: 'Sandy-loam', vegetation: 'Disturbed', previousSlides: false },
+        description: 'Construction-related landslide on Rajpur Road caused temporary traffic disruption.',
+        source: 'news',
+        verified: true
+    },
+    {
+        location: {
+            coordinates: [77.9875, 30.2945],
+            address: 'Clement Town',
+            city: 'Dehradun',
+            state: 'Uttarakhand',
+            country: 'India'
+        },
+        incidentDate: new Date('2025-07-10'),
+        severity: 'Major',
+        details: {
+            casualties: { deaths: 5, injuries: 18 },
+            damage: { housesDestroyed: 12, roadsBlocked: 4, estimatedCost: 12000000 },
+            area: { affectedAreaKm2: 1.8, volumeM3: 35000 }
+        },
+        triggers: { rainfall: 220, earthquake: false, humanActivity: false },
+        conditions: { slope: 43, soilType: 'Weathered rock', vegetation: 'Sparse', previousSlides: true },
+        description: 'Major landslide in Clement Town area during heavy rainfall, multiple houses damaged.',
+        source: 'official',
+        verified: true
     }
 ];
 

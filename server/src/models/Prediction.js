@@ -76,6 +76,23 @@ const predictionSchema = new mongoose.Schema({
         type: Date,
         default: () => new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
     },
+    // NEW: Track actual outcomes for model retraining
+    outcome_verified: {
+        type: Boolean,
+        default: false,
+    },
+    actual_outcome: {
+        type: Number, // 0 = no landslide, 1 = landslide occurred
+        default: null,
+    },
+    outcome_reported_at: {
+        type: Date,
+        default: null,
+    },
+    outcome_reported_by: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+    },
 }, {
     timestamps: true,
 });

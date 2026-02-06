@@ -45,7 +45,8 @@ function App() {
             {/* Protected user routes */}
             <Route element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
                 <Route path="/dashboard" element={<UserDashboard />} />
-                <Route path="/map" element={<RiskMap />} />
+                <Route path="/risk-map" element={<RiskMap />} />
+                <Route path="/map" element={<Navigate to="/risk-map" replace />} />
                 <Route path="/alerts" element={<Alerts />} />
                 <Route path="/route-analysis" element={<RouteAnalysis />} />
                 <Route path="/profile" element={<Profile />} />

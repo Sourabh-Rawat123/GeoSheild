@@ -395,7 +395,19 @@ def main():
     """
     try:
         # Read input from stdin
-        input_data = json.loads(sys.stdin.read())
+        raw_input = sys.stdin.read()
+        print(f"[DEBUG] Received raw input (first 200 chars): {raw_input[:200]}", file=sys.stderr)
+        
+        # Parse JSON
+        try:
+            input_data = json.loads(raw_input)
+            print(f"[DEBUG] Parsed input type: {type(input_data)}", file=sys.stderr)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON input: {str(e)}. Raw input: {raw_input[:100]}")
+        
+        # Validate input_data is a dict
+        if not isinstance(input_data, dict):
+            raise ValueError(f"Input data must be a dict, got {type(input_data)}. Value: {str(input_data)[:100]}")
         
         # Initialize predictor (loads model + CSV files from ml-service)
         predictor = LandslideMLPredictor()
@@ -405,12 +417,25 @@ def main():
         longitude = input_data.get('longitude')
         features = input_data.get('features', {})
         
+        print(f"[DEBUG] Extracted data - lat: {latitude}, lon: {longitude}, features: {type(features)}", file=sys.stderr)
+        
+        # Validate required fields
+        if latitude is None or longitude is None:
+            raise ValueError(f"Missing latitude or longitude. Input keys: {list(input_data.keys())}")
+        
         # Add coordinates to features
         features['latitude'] = latitude
         features['longitude'] = longitude
         
         # Run ML prediction (combines CSV reference data + live API data)
         ml_result = predictor.predict(features, latitude, longitude)
+        
+        # Ensure ml_result is a dict and successful
+        if not isinstance(ml_result, dict):
+            raise ValueError(f"ML prediction returned invalid type: {type(ml_result)}")
+        
+        if not ml_result.get('success', False):
+            raise ValueError(ml_result.get('error', 'ML prediction returned failure'))
         
         # Get historical event score from CSV
         historical_score = predictor.get_historical_score(latitude, longitude)
@@ -430,10 +455,19 @@ def main():
     except Exception as e:
         error_result = {
             "success": False,
-            "error": str(e)
+            "error": str(e),
+            "ml_result": {
+                "success": False,
+                "ml_probability": 0.5,
+                "risk_level": "UNKNOWN",
+                "confidence": 0.0
+            },
+            "historical_score": 0.0
         }
+        # Print error to stderr for logging
+        print(f"[ERROR] Main function failed: {str(e)}", file=sys.stderr)
+        # Print result to stdout (even on error)
         print(json.dumps(error_result))
-        sys.exit(1)
 
 if __name__ == "__main__":
     main()

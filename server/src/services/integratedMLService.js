@@ -49,15 +49,28 @@ class IntegratedMLService {
             // Step 3: Call Python ML script (40% + 10% weights)
             const mlData = await this.runMLPrediction(latitude, longitude, features);
 
+            // Validate ML data structure
+            if (!mlData || typeof mlData !== 'object') {
+                throw new Error(`ML prediction returned invalid data type: ${typeof mlData}`);
+            }
+
             if (!mlData.success) {
                 throw new Error(mlData.error || 'ML prediction failed');
+            }
+
+            if (!mlData.ml_result || typeof mlData.ml_result !== 'object') {
+                throw new Error(`ML result missing or invalid: ${JSON.stringify(mlData)}`);
+            }
+
+            if (typeof mlData.ml_result.ml_probability !== 'number') {
+                throw new Error(`ML probability missing or invalid: ${mlData.ml_result.ml_probability}`);
             }
 
             // Step 4: Combine all sources with weights
             const finalRisk = this.combineScores(
                 apiScore,
                 mlData.ml_result.ml_probability,
-                mlData.historical_score
+                mlData.historical_score || 0
             );
 
             // Step 5: Determine overall risk level and confidence
@@ -222,7 +235,7 @@ class IntegratedMLService {
     async runMLPrediction(latitude, longitude, features) {
         return new Promise((resolve, reject) => {
             const options = {
-                mode: 'json',
+                mode: 'text',  // Changed from 'json' to 'text' to avoid double-parsing
                 pythonPath: process.env.PYTHON_PATH || 'python',
                 pythonOptions: ['-u'],
                 scriptPath: path.dirname(this.pythonScriptPath),
@@ -238,13 +251,20 @@ class IntegratedMLService {
                 features
             };
 
+            // Send as JSON string - Python will parse it
             pyshell.send(JSON.stringify(inputData));
 
             let result = null;
             let stderrOutput = [];
 
             pyshell.on('message', (message) => {
-                result = message;
+                // In text mode, manually parse JSON response
+                try {
+                    result = JSON.parse(message);
+                } catch (e) {
+                    logger.warn('Failed to parse Python response as JSON', { message, error: e.message });
+                    result = message;
+                }
             });
 
             // Capture stderr for debugging but don't treat [DEBUG] as errors
@@ -301,10 +321,10 @@ class IntegratedMLService {
      * Determine risk level from combined score
      */
     getRiskLevel(score) {
-        if (score < 0.3) return 'LOW';
-        if (score < 0.6) return 'MODERATE';
-        if (score < 0.8) return 'HIGH';
-        return 'CRITICAL';
+        if (score < 0.3) return 'Low';
+        if (score < 0.6) return 'Moderate';
+        if (score < 0.8) return 'High';
+        return 'Severe';
     }
 
     /**

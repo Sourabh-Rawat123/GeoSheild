@@ -263,56 +263,76 @@ const RouteAnalysis = () => {
     };
 
     return (
-        <div className="space-y-6">
-            <div>
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-                    Route Risk Analysis
-                </h1>
-                <p className="text-gray-600 dark:text-gray-400">
-                    Analyze landslide risks along your travel route
-                </p>
+        <div className="space-y-6 p-6 max-w-7xl mx-auto">
+            {/* Hero Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-cyan-600 rounded-2xl shadow-2xl p-8 text-white">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="text-4xl font-bold mb-2 flex items-center gap-3">
+                            🛣️ Route Risk Analysis
+                        </h1>
+                        <p className="text-blue-100 text-lg">
+                            AI-powered landslide risk assessment for your travel route
+                        </p>
+                    </div>
+                    <div className="hidden md:block text-6xl">
+                        🗺️
+                    </div>
+                </div>
             </div>
 
             {/* Input Form */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+                    <span>📍</span> Enter Your Route
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Origin (Starting Point)
+                        <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                            <span className="text-green-600">🟢</span> Starting Point
                         </label>
                         <input
                             type="text"
                             value={origin}
                             onChange={(e) => setOrigin(e.target.value)}
                             placeholder="e.g., Mumbai, Maharashtra"
-                            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                            className="w-full px-5 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white text-lg transition-all"
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Destination (End Point)
+                        <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                            <span className="text-red-600">🔴</span> Destination
                         </label>
                         <input
                             type="text"
                             value={destination}
                             onChange={(e) => setDestination(e.target.value)}
                             placeholder="e.g., Pune, Maharashtra"
-                            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                            className="w-full px-5 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white text-lg transition-all"
                         />
                     </div>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex gap-4">
                     <button
                         onClick={analyzeRoute}
                         disabled={analyzing}
-                        className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
+                        className="flex-1 md:flex-none px-8 py-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed font-bold text-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all flex items-center justify-center gap-2"
                     >
-                        {analyzing ? '🔍 Analyzing...' : '🗺️ Analyze Route'}
+                        {analyzing ? (
+                            <>
+                                <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                                Analyzing Route...
+                            </>
+                        ) : (
+                            <>
+                                🔍 Analyze Route Safety
+                            </>
+                        )}
                     </button>
                     {routeData && (
                         <button
                             onClick={clearAnalysis}
-                            className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-medium"
+                            className="px-6 py-4 bg-gray-600 text-white rounded-xl hover:bg-gray-700 font-bold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all"
                         >
                             ✕ Clear
                         </button>
@@ -436,76 +456,92 @@ const RouteAnalysis = () => {
 
             {/* Results */}
             {routeData && riskAnalysis && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Route Info */}
-                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                            📍 Route Information
-                        </h3>
-                        <div className="space-y-3">
-                            <div className="flex justify-between">
-                                <span className="text-gray-600 dark:text-gray-400">Distance:</span>
-                                <span className="font-semibold text-gray-900 dark:text-white">{routeData.distance} km</span>
-                            </div>
-                            <div className="flex justify-between">
-                                <span className="text-gray-600 dark:text-gray-400">Duration:</span>
-                                <span className="font-semibold text-gray-900 dark:text-white">{routeData.duration} min</span>
-                            </div>
-                            <div className="flex justify-between">
-                                <span className="text-gray-600 dark:text-gray-400">Waypoints:</span>
-                                <span className="font-semibold text-gray-900 dark:text-white">{routeData.coordinates.length}</span>
-                            </div>
+                <div className="space-y-6">
+                    {/* Overall Safety Card */}
+                    <div className={`rounded-2xl shadow-2xl p-8 text-white ${riskAnalysis.safetyRating === 'Safe' ? 'bg-gradient-to-br from-green-500 to-green-700' :
+                        riskAnalysis.safetyRating === 'Moderate' ? 'bg-gradient-to-br from-yellow-500 to-yellow-700' :
+                            riskAnalysis.safetyRating === 'Risky' ? 'bg-gradient-to-br from-orange-500 to-orange-700' :
+                                'bg-gradient-to-br from-red-500 to-red-700'
+                        }`}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-3xl font-bold">Route Safety Assessment</h2>
+                            <span className="text-6xl">
+                                {riskAnalysis.safetyRating === 'Safe' ? '✅' :
+                                    riskAnalysis.safetyRating === 'Moderate' ? '⚠️' :
+                                        riskAnalysis.safetyRating === 'Risky' ? '🚨' : '⛔'}
+                            </span>
                         </div>
-                    </div>
-
-                    {/* Risk Summary */}
-                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                            ⚠️ Risk Summary
-                        </h3>
-                        <div className="space-y-3">
-                            <div>
-                                <span className="text-gray-600 dark:text-gray-400 text-sm">Safety Rating:</span>
-                                <div className={`mt-1 px-3 py-2 rounded-lg border-2 font-bold text-center ${getRiskColor(riskAnalysis.safetyRating)}`}>
-                                    {riskAnalysis.safetyRating}
+                        <div className="bg-white/20 backdrop-blur-sm rounded-xl p-6">
+                            <p className="text-sm font-semibold text-white/80 mb-2">OVERALL RATING</p>
+                            <p className="text-5xl font-bold mb-4">{riskAnalysis.safetyRating}</p>
+                            <div className="grid grid-cols-3 gap-4 mt-6">
+                                <div className="bg-white/10 rounded-lg p-4 text-center">
+                                    <p className="text-xs text-white/70 mb-1">Max Risk</p>
+                                    <p className="text-xl font-bold">{riskAnalysis.maxRisk}</p>
+                                </div>
+                                <div className="bg-white/10 rounded-lg p-4 text-center">
+                                    <p className="text-xs text-white/70 mb-1">Avg Score</p>
+                                    <p className="text-xl font-bold">{riskAnalysis.avgRiskScore}</p>
+                                </div>
+                                <div className="bg-white/10 rounded-lg p-4 text-center">
+                                    <p className="text-xs text-white/70 mb-1">Distance</p>
+                                    <p className="text-xl font-bold">{routeData.distance} km</p>
                                 </div>
                             </div>
-                            <div className="flex justify-between">
-                                <span className="text-gray-600 dark:text-gray-400">Max Risk:</span>
-                                <span className="font-semibold text-gray-900 dark:text-white">{riskAnalysis.maxRisk}</span>
-                            </div>
-                            <div className="flex justify-between">
-                                <span className="text-gray-600 dark:text-gray-400">Avg Risk Score:</span>
-                                <span className="font-semibold text-gray-900 dark:text-white">{riskAnalysis.avgRiskScore}</span>
-                            </div>
                         </div>
                     </div>
 
-                    {/* Risk Zones */}
-                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                            🚨 Risk Zones Detected
-                        </h3>
-                        <div className="space-y-3">
-                            <div className="flex justify-between items-center">
-                                <span className="text-red-600 font-medium">High Risk:</span>
-                                <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full font-bold">
+                    {/* Stats Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 hover:shadow-2xl transition-shadow">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                                    Route Info
+                                </h3>
+                                <span className="text-3xl">📍</span>
+                            </div>
+                            <div className="space-y-3">
+                                <InfoRow label="Distance" value={`${routeData.distance} km`} />
+                                <InfoRow label="Duration" value={`${routeData.duration} min`} />
+                                <InfoRow label="Waypoints" value={routeData.coordinates.length.toString()} />
+                            </div>
+                        </div>
+
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 hover:shadow-2xl transition-shadow">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                                    High Risk Zones
+                                </h3>
+                                <span className="text-3xl">🚨</span>
+                            </div>
+                            <div className="text-center py-6">
+                                <div className="text-6xl font-bold text-red-600 mb-2">
                                     {riskAnalysis.highRiskPoints.length}
-                                </span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                                <span className="text-yellow-600 font-medium">Moderate Risk:</span>
-                                <span className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full font-bold">
-                                    {riskAnalysis.moderateRiskPoints.length}
-                                </span>
-                            </div>
-                            {riskAnalysis.highRiskPoints.length === 0 && riskAnalysis.moderateRiskPoints.length === 0 && (
-                                <div className="text-center text-green-600 font-medium mt-2">
-                                    ✓ No significant risks detected
                                 </div>
-                            )}
+                                <p className="text-gray-600 dark:text-gray-400">Critical areas detected</p>
+                            </div>
+                        </div>
+
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 hover:shadow-2xl transition-shadow">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                                    Moderate Risk Zones
+                                </h3>
+                                <span className="text-3xl">⚠️</span>
+                            </div>
+                            <div className="text-center py-6">
+                                <div className="text-6xl font-bold text-yellow-600 mb-2">
+                                    {riskAnalysis.moderateRiskPoints.length}
+                                </div>
+                                <p className="text-gray-600 dark:text-gray-400">Caution areas detected</p>
+                            </div>
                         </div>
                     </div>
+                    {riskAnalysis.highRiskPoints.length === 0 && riskAnalysis.moderateRiskPoints.length === 0 && (
+                        <div className="text-center text-green-600 font-medium mt-2">
+                            ✓ No significant risks detected
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -583,5 +619,12 @@ const RouteAnalysis = () => {
         </div>
     );
 };
+
+const InfoRow = ({ label, value }) => (
+    <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-700">
+        <span className="text-gray-600 dark:text-gray-400 font-medium">{label}</span>
+        <span className="font-bold text-gray-900 dark:text-white">{value}</span>
+    </div>
+);
 
 export default RouteAnalysis;

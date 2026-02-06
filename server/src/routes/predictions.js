@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authMiddleware, roleMiddleware } = require('../middleware/auth');
 const predictionController = require('../controllers/predictionController');
+const outcomeController = require('../controllers/outcomeController');
 const HistoricalIncident = require('../models/HistoricalIncident');
 const Prediction = require('../models/Prediction');
 const logger = require('../utils/logger');
@@ -18,6 +19,10 @@ router.post('/route', authMiddleware, predictionController.analyzeRoute);
 router.get('/active', authMiddleware, predictionController.getActivePredictions);
 router.get('/nearby', authMiddleware, predictionController.getNearbyPredictions);
 router.get('/stats', authMiddleware, predictionController.getPredictionStats);
+router.get('/pending-verification', authMiddleware, outcomeController.getPendingVerification);
+
+// Outcome reporting for continuous learning
+router.post('/:id/outcome', authMiddleware, outcomeController.reportOutcome);
 
 // Admin routes
 router.delete('/cleanup', authMiddleware, roleMiddleware('admin', 'super_admin'), predictionController.cleanupOldPredictions);

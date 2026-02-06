@@ -7,7 +7,7 @@ const Sidebar = ({ open, setOpen }) => {
             <nav className="mt-6">
                 <a href="/dashboard" className="block py-2.5 px-6 hover:bg-gray-700">Dashboard</a>
                 <a href="/route-analysis" className="block py-2.5 px-6 hover:bg-gray-700">Route Analysis</a>
-                <a href="/map" className="block py-2.5 px-6 hover:bg-gray-700">Risk Map</a>
+                <a href="/risk-map" className="block py-2.5 px-6 hover:bg-gray-700">Risk Map</a>
                 <a href="/alerts" className="block py-2.5 px-6 hover:bg-gray-700">Alerts</a>
                 <a href="/profile" className="block py-2.5 px-6 hover:bg-gray-700">Profile</a>
             </nav>

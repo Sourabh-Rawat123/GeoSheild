@@ -152,36 +152,83 @@ class IntegratedMLService {
             console.log(`🟠   Longitude: ${longitude}`);
             // ===================================
 
-            const [weather, seismic, elevation] = await Promise.all([
+            const [weatherResponse, seismicResponse, elevationResponse] = await Promise.all([
                 weatherService.getCurrentWeather(latitude, longitude),
                 weatherService.getEarthquakeData(latitude, longitude, 100),
                 weatherService.getElevationData(latitude, longitude)
             ]);
 
+            // 1. Log raw API responses
+            console.log("RAW WEATHER API:", JSON.stringify(weatherResponse, null, 2));
+            console.log("RAW EARTHQUAKE API:", JSON.stringify(seismicResponse, null, 2));
+            console.log("RAW ELEVATION API:", JSON.stringify(elevationResponse, null, 2));
+
+            // 2. Validate API responses - weatherService already extracts data, so check for temperature directly
+            if (!weatherResponse || typeof weatherResponse.temperature !== 'number') {
+                console.warn('⚠️ Weather API response missing temperature field');
+                throw new Error('Weather API response is invalid or empty');
+            }
+            if (!seismicResponse || typeof seismicResponse.count !== 'number') {
+                console.warn('⚠️ Earthquake API response missing count field');
+                throw new Error('Earthquake API response is invalid or empty');
+            }
+            if (!elevationResponse || typeof elevationResponse.elevation !== 'number') {
+                console.warn('⚠️ Elevation API response missing elevation field');
+                throw new Error('Elevation API response is invalid or empty');
+            }
+
+            // 3. Extract real values safely from already-processed API responses
+            const temperature = weatherResponse.temperature;
+            const humidity = weatherResponse.humidity;
+            const pressure = weatherResponse.pressure;
+            const windSpeed = weatherResponse.windSpeed;
+            const rainfall24h = weatherResponse.rainfall || 0;
+            const rainfall72h = weatherResponse.rainfall72h || 0;
+
+            const earthquakeCount = seismicResponse.count;
+            const maxMagnitude = seismicResponse.maxMagnitude;
+            const avgMagnitude = seismicResponse.avgMagnitude;
+
+            const elevation = elevationResponse.elevation;
+            const slope = elevationResponse.slope_degrees || 0; // Note: field name is slope_degrees
+
+            // 4. Add debug logs AFTER extraction
+            console.log("EXTRACTED DATA:", { temperature, humidity, pressure, windSpeed, rainfall24h, rainfall72h, earthquakeCount, maxMagnitude, elevation, slope });
+
+            // 5. Validate that critical fields are real numbers (not defaults)
+            if (!Number.isFinite(temperature) || !Number.isFinite(humidity) || !Number.isFinite(elevation)) {
+                throw new Error('Extracted data contains invalid numbers');
+            }
+
+            // 6. If using fallback values, log warning
+            if (rainfall24h === 0 && maxMagnitude === 0) {
+                logger.warn("⚠ Rainfall and earthquake data are both zero, may be using defaults");
+            }
+
             console.log(`🟠 All APIs called successfully. Returning data for [${latitude}, ${longitude}]`);
 
             return {
                 weather: {
-                    temperature: weather.main?.temp || 25,
-                    humidity: weather.main?.humidity || 50,
-                    pressure: weather.main?.pressure || 1013,
-                    windSpeed: weather.wind?.speed || 0,
-                    rainfall24h: weather.rainfall24h || 0,
-                    rainfall72h: weather.rainfall72h || 0
+                    temperature: temperature,
+                    humidity: humidity,
+                    pressure: pressure,
+                    windSpeed: windSpeed,
+                    rainfall24h: rainfall24h,
+                    rainfall72h: rainfall72h
                 },
                 seismic: {
-                    count: seismic.count || 0,
-                    maxMagnitude: seismic.maxMagnitude || 0,
-                    avgMagnitude: seismic.avgMagnitude || 0
+                    count: earthquakeCount,
+                    maxMagnitude: maxMagnitude,
+                    avgMagnitude: avgMagnitude
                 },
                 terrain: {
-                    elevation: elevation.elevation || 0,
-                    slope: elevation.slope || 0
+                    elevation: elevation,
+                    slope: slope
                 }
             };
         } catch (error) {
             console.error(`🟠 API data fetch failed:`, error.message);
-            logger.warn('API data fetch failed, using defaults', { error: error.message });
+            logger.error(`API data fetch failed: ${error.message}`);
             // Return default values if APIs fail
             return {
                 weather: { temperature: 25, humidity: 50, pressure: 1013, windSpeed: 0, rainfall24h: 0, rainfall72h: 0 },
@@ -194,60 +241,184 @@ class IntegratedMLService {
     /**
      * Calculate risk score from API data (0-1)
      */
+    /**
+     * Calculate risk score from API data (weather, terrain, seismic)
+     * Returns value 0.0 to 1.0 representing risk level
+     */
     calculateAPIScore(apiData) {
         let score = 0;
+        const factors = {}; // For detailed logging
 
-        // Rainfall factor (40% of API score) - Using 24h rainfall
+        // 1. RAINFALL FACTOR (25% of API score) - Primary indicator
         const rainfall24h = apiData.weather.rainfall24h;
-        if (rainfall24h > 50) score += 0.4;          // Heavy rainfall (>50mm/24h)
-        else if (rainfall24h > 30) score += 0.3;     // Moderate rainfall (30-50mm)
-        else if (rainfall24h > 15) score += 0.2;     // Light-moderate rainfall (15-30mm)
-        else score += rainfall24h / 50 * 0.2;        // Proportional for light rain
+        const rainfall72h = apiData.weather.rainfall72h;
+        const maxRainfall = Math.max(rainfall24h, rainfall72h);
 
-        // Earthquake factor (30% of API score)
-        if (apiData.seismic.maxMagnitude > 5.0) score += 0.3;
-        else if (apiData.seismic.maxMagnitude > 4.0) score += 0.2;
-        else if (apiData.seismic.maxMagnitude > 3.0) score += 0.1;
-        else score += apiData.seismic.maxMagnitude / 30;
+        if (maxRainfall > 100) {
+            factors.rainfall = 0.25; // Extreme rainfall (>100mm)
+            score += 0.25;
+        } else if (maxRainfall > 50) {
+            factors.rainfall = 0.20; // Heavy rainfall (50-100mm)
+            score += 0.20;
+        } else if (maxRainfall > 25) {
+            factors.rainfall = 0.15; // Moderate rainfall (25-50mm)
+            score += 0.15;
+        } else if (maxRainfall > 10) {
+            factors.rainfall = 0.10; // Light rainfall (10-25mm)
+            score += 0.10;
+        } else {
+            // Proportional for minimal rainfall
+            factors.rainfall = (maxRainfall / 50) * 0.25;
+            score += factors.rainfall;
+        }
 
-        // Slope factor (20% of API score)
+        // 2. TERRAIN/SLOPE FACTOR (25% of API score) - Critical for landslides
         const slope = apiData.terrain.slope;
-        if (slope > 30) score += 0.2;
-        else if (slope > 20) score += 0.15;
-        else if (slope > 10) score += 0.1;
-        else score += slope / 100 * 0.1;
+        if (slope > 35) {
+            factors.slope = 0.25; // Very steep (>35°)
+            score += 0.25;
+        } else if (slope > 25) {
+            factors.slope = 0.20; // Steep (25-35°)
+            score += 0.20;
+        } else if (slope > 15) {
+            factors.slope = 0.15; // Moderate (15-25°)
+            score += 0.15;
+        } else if (slope > 5) {
+            factors.slope = 0.10; // Slight (5-15°)
+            score += 0.10;
+        } else {
+            // Proportional for flat terrain
+            factors.slope = (slope / 35) * 0.25;
+            score += factors.slope;
+        }
 
-        // Humidity factor (10% of API score)
+        // 3. ELEVATION FACTOR (15% of API score) - Higher elevation = steeper terrain
+        const elevation = apiData.terrain.elevation;
+        if (elevation > 2000) {
+            factors.elevation = 0.15; // Very high elevation (>2000m)
+            score += 0.15;
+        } else if (elevation > 1500) {
+            factors.elevation = 0.12; // High elevation (1500-2000m)
+            score += 0.12;
+        } else if (elevation > 1000) {
+            factors.elevation = 0.10; // Medium elevation (1000-1500m)
+            score += 0.10;
+        } else if (elevation > 500) {
+            factors.elevation = 0.08; // Low elevation (500-1000m)
+            score += 0.08;
+        } else if (elevation > 0) {
+            factors.elevation = (elevation / 2000) * 0.15;
+            score += factors.elevation;
+        } else {
+            factors.elevation = 0;
+        }
+
+        // 4. SEISMIC FACTOR (20% of API score) - Earthquakes trigger landslides
+        const maxMagnitude = apiData.seismic.maxMagnitude;
+        const earthquakeCount = apiData.seismic.count;
+
+        if (maxMagnitude > 5.0) {
+            factors.seismic = 0.20; // Major earthquake (>5.0 magnitude)
+            score += 0.20;
+        } else if (maxMagnitude > 4.0) {
+            factors.seismic = 0.15; // Moderate earthquake (4.0-5.0)
+            score += 0.15;
+        } else if (maxMagnitude > 3.0) {
+            factors.seismic = 0.10; // Minor earthquake (3.0-4.0)
+            score += 0.10;
+        } else if (earthquakeCount > 5) {
+            // Multiple smaller earthquakes can destabilize terrain
+            factors.seismic = Math.min(0.12, (earthquakeCount / 10) * 0.20);
+            score += factors.seismic;
+        } else {
+            factors.seismic = (maxMagnitude / 30) * 0.20;
+            score += factors.seismic;
+        }
+
+        // 5. HUMIDITY FACTOR (15% of API score) - Water saturation increases risk
         const humidity = apiData.weather.humidity;
-        if (humidity > 80) score += 0.1;
-        else if (humidity > 60) score += 0.05;
-        else score += humidity / 1000;
+        if (humidity > 90) {
+            factors.humidity = 0.15; // Very wet (>90% humidity)
+            score += 0.15;
+        } else if (humidity > 75) {
+            factors.humidity = 0.12; // Wet (75-90%)
+            score += 0.12;
+        } else if (humidity > 60) {
+            factors.humidity = 0.08; // Moderate (60-75%)
+            score += 0.08;
+        } else if (humidity > 40) {
+            factors.humidity = 0.04; // Dry (40-60%)
+            score += 0.04;
+        } else {
+            factors.humidity = 0; // Very dry (<40%)
+        }
 
-        return Math.min(score, 1.0);
+        // Cap score at 1.0
+        const finalScore = Math.min(score, 1.0);
+
+        // Log factor breakdown for transparency
+        console.log('🟠 calculateAPIScore() factor breakdown:');
+        console.log(`   Rainfall (0-25%): ${(factors.rainfall * 100).toFixed(1)}%`);
+        console.log(`   Slope (0-25%): ${(factors.slope * 100).toFixed(1)}%`);
+        console.log(`   Elevation (0-15%): ${(factors.elevation * 100).toFixed(1)}%`);
+        console.log(`   Seismic (0-20%): ${(factors.seismic * 100).toFixed(1)}%`);
+        console.log(`   Humidity (0-15%): ${(factors.humidity * 100).toFixed(1)}%`);
+        console.log(`   Total API Score: ${(finalScore * 100).toFixed(1)}%`);
+
+        return finalScore;
     }
 
     /**
      * Build feature set for ML model
      */
     buildFeatures(apiData, latitude, longitude) {
-        return {
+        // IMPORTANT: Make sure we use the actual API data, not defaults
+        const rainfall = apiData.weather.rainfall24h;
+        const earthquakeMagnitude = apiData.seismic.maxMagnitude;
+        const elevation = apiData.terrain.elevation;
+        const slope = apiData.terrain.slope;
+
+        console.log("🟠 buildFeatures() - Input validation:");
+        console.log(`   temperature: ${apiData.weather.temperature} (expect ~25-30, not 25)`);
+        console.log(`   rainfall: ${rainfall} (expect >=0)`);
+        console.log(`   earthquake_magnitude: ${earthquakeMagnitude} (expect >=0)`);
+        console.log(`   elevation: ${elevation} (expect >0, NOT a longitude like 73.xxx)`);
+        console.log(`   slope: ${slope} (expect >0, NOT 0)`);
+
+        const mlInput = {
             latitude,
             longitude,
             temperature: apiData.weather.temperature,
             humidity: apiData.weather.humidity,
             pressure: apiData.weather.pressure,
             wind_speed: apiData.weather.windSpeed,
-            rainfall_24h: apiData.weather.rainfall24h,
+            rainfall_24h: rainfall,
             rainfall_72h: apiData.weather.rainfall72h,
-            elevation: apiData.terrain.elevation,
-            slope: apiData.terrain.slope,
+            elevation: elevation,
+            slope: slope,
             earthquake_count: apiData.seismic.count,
-            max_earthquake_magnitude: apiData.seismic.maxMagnitude,
+            max_earthquake_magnitude: earthquakeMagnitude,
             soil_moisture: 0.5, // Default - can be enhanced
             ndvi: 0.5, // Default - can be enhanced
             distance_to_fault: 10.0, // Default - can be enhanced
             population_density: 100 // Default - can be enhanced
         };
+
+        // 6. Log final ML payload with validation
+        console.log("FINAL ML INPUT:", JSON.stringify(mlInput, null, 2));
+
+        // Validate no values are using defaults when real data should be present
+        if (elevation === 0) {
+            console.warn("⚠️ WARNING: elevation is 0! This means elevation API data was not used");
+        }
+        if (slope === 0) {
+            console.warn("⚠️ WARNING: slope is 0! This could mean terrain is flat or data not loaded");
+        }
+        if (rainfall === 0 && earthquakeMagnitude === 0) {
+            console.warn("⚠️ WARNING: Both rainfall and earthquake are 0! May be using all defaults");
+        }
+
+        return mlInput;
     }
 
     /**

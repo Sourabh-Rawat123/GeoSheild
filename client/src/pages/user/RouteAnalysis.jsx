@@ -118,15 +118,15 @@ const RouteAnalysis = () => {
                     coordinates: routeCoords
                 });
 
-                // Sample points along route for prediction (every 5km or fewer for short routes)
-                const sampleDistance = 5000; // 5km
+                // Sample points along route for prediction (every 10km, max 8 points to avoid API rate limiting)
+                const sampleDistance = 10000; // 10km per sample
                 const totalDistance = summary.totalDistance;
-                const numSamples = Math.max(3, Math.ceil(totalDistance / sampleDistance));
+                const numSamples = Math.min(8, Math.max(3, Math.ceil(totalDistance / sampleDistance))); // Cap at 8 points
                 const sampledCoords = [];
 
                 console.log('\n🟢 ========== FRONTEND ROUTE ANALYSIS ==========');
                 console.log(`🟢 Route analysis started`);
-                console.log(`🟢 Total distance: ${totalDistance}m, Sampling ${numSamples} points`);
+                console.log(`🟢 Total distance: ${totalDistance}m, Sampling ${numSamples} points (max 8 to avoid API rate limiting)`);
 
                 for (let i = 0; i < numSamples; i++) {
                     const index = Math.floor((i / numSamples) * (routeCoords.length - 1));
@@ -138,7 +138,7 @@ const RouteAnalysis = () => {
                 // Get predictions for sampled points
                 const token = localStorage.getItem('token');
                 const predictionsPromises = sampledCoords.map((coord, index) => {
-                    console.log(`🟢 Sending request ${index}/${sampledCoords.length}`);
+                    console.log(`🟢 Sending request ${index + 1}/${sampledCoords.length}`);
                     console.log(`🟢   Timestamp: ${new Date().toISOString()}`);
                     console.log(`🟢   Latitude: ${coord.lat} (type: ${typeof coord.lat})`);
                     console.log(`🟢   Longitude: ${coord.lng} (type: ${typeof coord.lng})`);
@@ -148,15 +148,23 @@ const RouteAnalysis = () => {
                         latitude: coord.lat,
                         longitude: coord.lng
                     }, {
-                        headers: { Authorization: `Bearer ${token}` }
+                        headers: { Authorization: `Bearer ${token}` },
+                        timeout: 30000  // 30 second timeout for predictions (APIs may be slow with retries)
                     }).then(response => {
-                        console.log(`🟢 Response received for [${coord.lat}, ${coord.lng}]:`, {
-                            riskLevel: response.data.prediction.riskLevel,
-                            probability: (response.data.prediction.probability * 100).toFixed(1) + '%'
+                        console.log(`🟢 ✅ Response received for [${coord.lat}, ${coord.lng}]:`, {
+                            riskLevel: response.data?.prediction?.riskLevel,
+                            probability: response.data?.prediction?.probability ? (response.data.prediction.probability * 100).toFixed(1) + '%' : 'N/A',
+                            confidence: response.data?.prediction?.confidence ? (response.data.prediction.confidence * 100).toFixed(1) + '%' : 'N/A'
                         });
                         return response;
                     }).catch(err => {
-                        console.error(`🟢 ❌ Prediction failed for [${coord.lat}, ${coord.lng}]`, err.message);
+                        const errorMsg = err.response?.data?.message || err.message;
+                        console.error(`🟢 ❌ Prediction failed for [${coord.lat}, ${coord.lng}]: ${errorMsg}`, {
+                            status: err.response?.status,
+                            statusText: err.response?.statusText,
+                            data: err.response?.data
+                        });
+                        toast.error(`Prediction failed for point ${index + 1}: ${errorMsg}`, { duration: 3000 });
                         return null;
                     })
                 });
@@ -165,23 +173,34 @@ const RouteAnalysis = () => {
                 const successfulPredictions = predictions.filter(p => p !== null);
 
                 console.log(`🟢 Received ${successfulPredictions.length}/${sampledCoords.length} predictions`);
+                if (successfulPredictions.length === 0) {
+                    toast.error('No predictions received. Please check your API connection.', { duration: 4000 });
+                    setAnalyzing(false);
+                    return;
+                }
+
                 console.log(`🟢 Risk analysis:`, successfulPredictions.map((p, i) => ({
                     point: i,
                     coords: [sampledCoords[i].lat, sampledCoords[i].lng],
-                    risk: p.data.prediction.riskLevel,
-                    prob: (p.data.prediction.probability * 100).toFixed(1) + '%'
+                    risk: p.data?.prediction?.riskLevel,
+                    prob: p.data?.prediction?.probability ? (p.data.prediction.probability * 100).toFixed(1) + '%' : 'N/A'
                 })));
 
                 // Analyze route risk from predictions
-                const routePredictions = successfulPredictions.map((p, i) => ({
-                    location: {
-                        coordinates: [sampledCoords[i].lng, sampledCoords[i].lat]
-                    },
-                    prediction: {
-                        riskLevel: p.data.prediction.riskLevel,
-                        probability: p.data.prediction.probability
-                    }
-                }));
+                const routePredictions = successfulPredictions.map((p, i) => {
+                    const riskLevel = p.data?.prediction?.riskLevel || 'Moderate';
+                    const probability = p.data?.prediction?.probability || 0.5;
+
+                    return {
+                        location: {
+                            coordinates: [sampledCoords[i].lng, sampledCoords[i].lat]
+                        },
+                        prediction: {
+                            riskLevel,
+                            probability
+                        }
+                    };
+                });
 
                 const riskZones = analyzeRouteRisk(routeCoords, routePredictions);
                 setRiskAnalysis(riskZones);
@@ -219,8 +238,8 @@ const RouteAnalysis = () => {
 
                 // Add risk markers for sampled predictions
                 successfulPredictions.forEach((p, i) => {
-                    const riskLevel = p.data.prediction.riskLevel;
-                    const probability = p.data.prediction.probability;
+                    const riskLevel = p.data?.prediction?.riskLevel || 'Moderate';
+                    const probability = p.data?.prediction?.probability || 0.5;
                     const color = riskLevel === 'Severe' ? '#ef4444' :
                         riskLevel === 'High' ? '#f97316' :
                             riskLevel === 'Moderate' ? '#eab308' : '#22c55e';
@@ -237,7 +256,8 @@ const RouteAnalysis = () => {
                             <div class="p-2">
                                 <strong>📊 Route Risk Point</strong><br/>
                                 Risk Level: <span style="color: ${color}; font-weight: bold;">${riskLevel}</span><br/>
-                                Probability: ${(probability * 100).toFixed(1)}%
+                                Probability: ${(probability * 100).toFixed(1)}%<br/>
+                                Location: [${sampledCoords[i].lat.toFixed(4)}, ${sampledCoords[i].lng.toFixed(4)}]
                             </div>
                         `);
                 });

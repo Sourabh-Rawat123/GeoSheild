@@ -79,18 +79,58 @@ exports.getPrediction = asyncHandler(async (req, res) => {
         throw new ApiError('Latitude and longitude are required', 400);
     }
 
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        throw new ApiError('Latitude and longitude must be valid numbers', 400);
+    }
+
+    if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+        throw new ApiError('Latitude must be between -90 and 90, longitude between -180 and 180', 400);
+    }
+
     // Get integrated prediction (ML runs in backend process)
     logger.info(`🔵 Calling integratedMLService.predict(${latitude}, ${longitude})`);
-    const result = await integratedMLService.predict(latitude, longitude);
 
-    // Validate and sanitize confidence value
-    let confidence = result.prediction.confidence;
-    if (isNaN(confidence) || confidence === null || confidence === undefined) {
-        logger.warn(`Confidence is NaN, using fallback value for [${latitude}, ${longitude}]`);
-        confidence = 0.5; // Default confidence fallback
+    let result;
+    try {
+        result = await integratedMLService.predict(latitude, longitude);
+        console.log('🔵 integratedMLService.predict() succeeded');
+    } catch (error) {
+        console.error('🔵 integratedMLService.predict() failed:', error.message);
+        logger.error(`Prediction failed for [${latitude}, ${longitude}]: ${error.message}`);
+        throw new ApiError(`Prediction failed: ${error.message}`, 500);
     }
+
+    // Validate result structure
+    if (!result || !result.prediction) {
+        throw new ApiError('Invalid prediction result structure', 500);
+    }
+
+    // Validate and sanitize confidence value with multiple fallbacks
+    let confidence = result.prediction.confidence;
+
+    if (typeof confidence !== 'number' || isNaN(confidence) || !Number.isFinite(confidence)) {
+        console.warn(`🔵 ⚠️ Confidence is invalid (${typeof confidence}: ${confidence}), using fallback 0.5`);
+        logger.warn(`Confidence is invalid for [${latitude}, ${longitude}], using fallback`);
+        confidence = 0.5;
+    }
+
     // Ensure confidence is between 0 and 1
     confidence = Math.max(0, Math.min(1, confidence));
+
+    // Validate risk level
+    const validRiskLevels = ['Low', 'Moderate', 'High', 'Severe'];
+    if (!validRiskLevels.includes(result.prediction.riskLevel)) {
+        console.warn(`🔵 ⚠️ Invalid risk level: ${result.prediction.riskLevel}, defaulting to 'Moderate'`);
+        result.prediction.riskLevel = 'Moderate';
+    }
+
+    // Validate probability
+    if (typeof result.prediction.probability !== 'number' || isNaN(result.prediction.probability)) {
+        console.warn(`🔵 ⚠️ Probability is invalid, using fallback 0.5`);
+        result.prediction.probability = 0.5;
+    }
+
+    result.prediction.probability = Math.max(0, Math.min(1, result.prediction.probability));
 
     // Store prediction in database
     const storedPrediction = new Prediction({
@@ -106,17 +146,17 @@ exports.getPrediction = asyncHandler(async (req, res) => {
         },
         features: {
             // Map from result.breakdown to prediction features
-            slope: result.breakdown?.api?.slope || 0,
-            elevation: result.breakdown?.api?.elevation || 0,
-            rainfall: result.breakdown?.api?.rainfall_24h || 0
+            slope: result.breakdown?.api?.data?.slope || 0,
+            elevation: result.breakdown?.api?.data?.elevation || 0,
+            rainfall: result.breakdown?.api?.data?.rainfall24h || 0
         },
         weather: {
-            currentRainfall: result.breakdown?.api?.rainfall_24h || 0,
-            forecast24h: result.breakdown?.api?.rainfall_24h || 0,
-            forecast72h: result.breakdown?.api?.rainfall_72h || 0,
-            temperature: result.breakdown?.api?.temperature || 0,
-            humidity: result.breakdown?.api?.humidity || 0,
-            windSpeed: result.breakdown?.api?.wind_speed || 0
+            currentRainfall: result.breakdown?.api?.data?.rainfall24h || 0,
+            forecast24h: result.breakdown?.api?.data?.rainfall24h || 0,
+            forecast72h: result.breakdown?.api?.data?.rainfall72h || 0,
+            temperature: result.breakdown?.api?.data?.temperature || 0,
+            humidity: result.breakdown?.api?.data?.humidity || 0,
+            windSpeed: result.breakdown?.api?.data?.wind_speed || 0
         },
         mlModel: {
             name: 'ensemble',
@@ -124,23 +164,50 @@ exports.getPrediction = asyncHandler(async (req, res) => {
         }
     });
 
-    await storedPrediction.save();
+    try {
+        await storedPrediction.save();
+        console.log(`🔵 Prediction saved to DB with ID: ${storedPrediction._id}`);
+    } catch (dbError) {
+        console.warn(`🔵 ⚠️ Failed to save prediction to database: ${dbError.message}`);
+        logger.warn(`Failed to save prediction to DB: ${dbError.message}`);
+        // Continue without saving to DB - still return the prediction
+    }
 
     // Create alert if risk is high enough
-    await createAlertIfNeeded(result.prediction, req.user.id, latitude, longitude);
+    try {
+        await createAlertIfNeeded(result.prediction, req.user.id, latitude, longitude);
+    } catch (alertError) {
+        console.warn(`🔵 ⚠️ Failed to create alert: ${alertError.message}`);
+        logger.warn(`Failed to create alert: ${alertError.message}`);
+        // Continue - alert failure should not block prediction response
+    }
 
     logger.info(`Integrated prediction for [${latitude}, ${longitude}]: ${result.prediction.riskLevel} (${(result.prediction.probability * 100).toFixed(1)}%)`);
 
-    res.json({
+    // Return response with explicit structure
+    const responseData = {
         success: true,
         prediction: {
             id: storedPrediction._id,
-            ...result.prediction,
-            confidence: confidence
+            riskLevel: result.prediction.riskLevel,
+            probability: result.prediction.probability,
+            confidence: confidence,
+            coordinates: { latitude, longitude }
         },
         breakdown: result.breakdown,
         metadata: result.metadata
-    });
+    };
+
+    console.log(`🔵 Sending response:`, JSON.stringify({
+        success: responseData.success,
+        prediction: {
+            riskLevel: responseData.prediction.riskLevel,
+            probability: responseData.prediction.probability,
+            confidence: responseData.prediction.confidence
+        }
+    }, null, 2));
+
+    res.json(responseData);
 });
 
 /**

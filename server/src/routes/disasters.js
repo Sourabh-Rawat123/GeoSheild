@@ -8,6 +8,7 @@ const unifiedDisasterService = require('../services/unifiedDisasterService');
 const logger = require('../utils/logger');
 const asyncHandler = require('../utils/async_handler');
 const ApiError = require('../utils/api_error');
+const RealTimeEvent = require('../models/RealTimeEvent');
 
 /**
  * Sync both NASA EONET + ReliefWeb
@@ -76,8 +77,6 @@ router.get('/health', asyncHandler(async (req, res) => {
  * GET /api/disasters/analytics
  */
 router.get('/analytics', asyncHandler(async (req, res) => {
-    const RealTimeEvent = require('../models/RealTimeEvent');
-
     const { days = 30 } = req.query;
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - parseInt(days));

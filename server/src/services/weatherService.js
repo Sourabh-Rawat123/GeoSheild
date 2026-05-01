@@ -1,5 +1,6 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
+const elevationService = require('./elevationService');
 
 const OPENWEATHER_API_KEY = process.env.OPENWEATHER_API_KEY || '';
 const OPENWEATHER_BASE_URL = 'https://api.openweathermap.org/data/2.5';
@@ -10,6 +11,12 @@ class WeatherService {
      */
     async getCurrentWeather(lat, lon) {
         try {
+            // === DEBUG: Log coordinates ===
+            console.log(`🟡 weatherService.getCurrentWeather() called`);
+            console.log(`🟡   Latitude: ${lat} (type: ${typeof lat})`);
+            console.log(`🟡   Longitude: ${lon} (type: ${typeof lon})`);
+            // ================================
+
             if (!OPENWEATHER_API_KEY) {
                 logger.warn('OpenWeather API key not configured, returning mock data');
                 return this.getMockWeatherData(lat, lon);
@@ -27,6 +34,12 @@ class WeatherService {
 
             const data = response.data;
 
+            console.log(`🟡 OpenWeather API response for [${lat}, ${lon}]:`, {
+                temp: data.main?.temp,
+                apiLat: data.coord?.lat,
+                apiLon: data.coord?.lon
+            });
+
             return {
                 temperature: data.main.temp,
                 humidity: data.main.humidity,
@@ -38,6 +51,7 @@ class WeatherService {
                 timestamp: new Date(data.dt * 1000)
             };
         } catch (err) {
+            console.error(`🟡 Weather API error:`, err.message);
             logger.error(`Weather API error: ${err.message}`);
             return this.getMockWeatherData(lat, lon);
         }
@@ -151,38 +165,21 @@ class WeatherService {
             return { hasAlert: false, alerts: [], error: err.message };
         }
     }
-    
+
     /**
      * Get elevation and slope data
+     * Uses dedicated elevationService with caching and rate limiting
      */
     async getElevationData(lat, lon) {
         try {
-            const url = 'https://api.open-elevation.com/api/v1/lookup';
-            
-            const locations = [
-                {latitude: lat, longitude: lon},
-                {latitude: lat + 0.001, longitude: lon},
-                {latitude: lat, longitude: lon + 0.001}
-            ];
-            
-            const response = await axios.post(url, {locations}, {timeout: 5000});
-            const results = response.data.results;
-            
-            const elevations = results.map(r => r.elevation);
-            const rise = Math.max(
-                Math.abs(elevations[1] - elevations[0]),
-                Math.abs(elevations[2] - elevations[0])
-            );
-            const slopeDegrees = Math.atan(rise / 111) * (180 / Math.PI);
-            
-            return {
-                elevation: elevations[0],
-                slope_degrees: slopeDegrees,
-                terrain_variation: Math.max(...elevations) - Math.min(...elevations)
-            };
+            // Delegates to elevationService which handles:
+            // - In-memory LRU cache (100 locations)
+            // - Concurrency limiting (max 2 concurrent requests)
+            // - Exponential backoff retry for 429 errors
+            return await elevationService.getElevationData(lat, lon);
         } catch (err) {
-            logger.error(`Elevation API error: ${err.message}`);
-            return {elevation: 0, slope_degrees: 0, terrain_variation: 0};
+            logger.error(`Elevation data fetch failed: ${err.message}`);
+            return { elevation: 0, slope_degrees: 0, terrain_variation: 0, isFallback: true };
         }
     }
 
@@ -192,11 +189,11 @@ class WeatherService {
     async getEarthquakeData(lat, lon, radiusKm = 100) {
         try {
             const url = 'https://earthquake.usgs.gov/fdsnws/event/1/query';
-            
+
             const thirtyDaysAgo = new Date();
             thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
             const startTime = thirtyDaysAgo.toISOString().split('T')[0];
-            
+
             const response = await axios.get(url, {
                 params: {
                     format: 'geojson',
@@ -208,9 +205,9 @@ class WeatherService {
                 },
                 timeout: 5000
             });
-            
+
             const earthquakes = response.data.features;
-            
+
             if (earthquakes.length === 0) {
                 return {
                     earthquake_count: 0,
@@ -218,9 +215,9 @@ class WeatherService {
                     recent_earthquake: false
                 };
             }
-            
+
             const magnitudes = earthquakes.map(eq => eq.properties.mag);
-            
+
             return {
                 earthquake_count: earthquakes.length,
                 max_magnitude: Math.max(...magnitudes),
@@ -258,7 +255,7 @@ class WeatherService {
                 elevation,
                 seismic,
                 timestamp: new Date(),
-                location: {lat, lon}
+                location: { lat, lon }
             };
         } catch (err) {
             logger.error(`Error fetching environmental data: ${err.message}`);
@@ -267,7 +264,7 @@ class WeatherService {
     }
 
 
-    
+
 
     /**
      * Mock weather data for development

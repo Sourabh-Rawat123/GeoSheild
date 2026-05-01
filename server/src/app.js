@@ -2,6 +2,9 @@ require('dotenv').config();
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require('cors');
+const helmet = require('helmet');
+const mongoSanitize = require('express-mongo-sanitize');
+const rateLimit = require('express-rate-limit');
 const logger = require('./utils/logger');
 
 const authRoutes = require('./routes/auth');
@@ -12,8 +15,11 @@ const weatherRoutes = require('./routes/weather');
 const incidentRoutes = require('./routes/incidents');
 const adminRoutes = require('./routes/admin');
 const seedRoutes = require('./routes/seed');
+const disasterRoutes = require('./routes/disasters');
 const errorHandler = require('./middleware/errorHandler');
 const modelRetrainingScheduler = require('./services/modelRetrainingScheduler');
+const unifiedDisasterScheduler = require('./services/unifiedDisasterScheduler');
+const { initializeIndexes } = require('./utils/indexInitializer');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -23,6 +29,18 @@ app.use(cors({
     origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:5173'],
     credentials: true
 }));
+
+// Security middleware
+app.use(helmet()); // Secure HTTP headers
+app.use(mongoSanitize()); // Prevent NoSQL injection
+
+// Rate limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per windowMs
+    message: 'Too many requests from this IP, please try again later.'
+});
+app.use('/api/', limiter);
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -77,6 +95,7 @@ app.use('/api/weather', weatherRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/incidents', incidentRoutes);
 app.use('/api/seed', seedRoutes);
+app.use('/api/disasters', disasterRoutes);
 
 // 404 handler
 app.use((req, res) => {
@@ -92,13 +111,26 @@ app.use(errorHandler);
 
 // Database connection
 mongoose.connect(process.env.MONGODB_URI)
-    .then(() => {
+    .then(async () => {
         logger.info('✓ MongoDB connected successfully');
+
+        // Initialize database indexes
+        try {
+            await initializeIndexes();
+        } catch (error) {
+            logger.warn(`Index initialization warning: ${error.message}`);
+        }
 
         // Start model retraining scheduler
         if (process.env.ENABLE_AUTO_RETRAIN !== 'false') {
             modelRetrainingScheduler.start();
             logger.info('✓ Model retraining scheduler started');
+        }
+
+        // Start unified disaster scheduler (NASA EONET + ReliefWeb)
+        if (process.env.ENABLE_DISASTER_SYNC !== 'false') {
+            unifiedDisasterScheduler.start();
+            logger.info('✓ Unified Disaster Scheduler started');
         }
 
         // Start server
@@ -116,6 +148,7 @@ mongoose.connect(process.env.MONGODB_URI)
 // Graceful shutdown
 process.on('SIGTERM', () => {
     logger.info('SIGTERM received, shutting down gracefully');
+    unifiedDisasterScheduler.stop();
     mongoose.connection.close(() => {
         logger.info('MongoDB connection closed');
         process.exit(0);
@@ -124,6 +157,7 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
     logger.info('SIGINT received, shutting down gracefully');
+    unifiedDisasterScheduler.stop();
     mongoose.connection.close(() => {
         logger.info('MongoDB connection closed');
         process.exit(0);

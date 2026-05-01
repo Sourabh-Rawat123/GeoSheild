@@ -2,6 +2,7 @@ const HistoricalIncident = require('../models/HistoricalIncident');
 const logger = require('../utils/logger');
 const asyncHandler = require('../utils/async_handler');
 const ApiError = require('../utils/api_error');
+const landslideDataService = require('../services/landslideDataService');
 
 /**
  * @desc    Get all historical incidents
@@ -9,8 +10,26 @@ const ApiError = require('../utils/api_error');
  * @access  Private
  */
 exports.getAllIncidents = asyncHandler(async (req, res) => {
-    const { page = 1, limit = 50, severity, startDate, endDate } = req.query;
+    const { page = 1, limit = 50, severity, startDate, endDate, dynamic = false } = req.query;
 
+    // If dynamic flag is set, fetch from real sources
+    if (dynamic === 'true') {
+        const incidents = await landslideDataService.getAllIncidents();
+
+        let filtered = incidents;
+        if (severity) {
+            filtered = filtered.filter(i => i.severity === severity);
+        }
+
+        return res.json({
+            success: true,
+            source: 'dynamic',
+            incidents: filtered,
+            total: filtered.length
+        });
+    }
+
+    // Otherwise fetch from database
     const query = {};
 
     // Filter by severity
@@ -35,6 +54,7 @@ exports.getAllIncidents = asyncHandler(async (req, res) => {
 
     res.json({
         success: true,
+        source: 'database',
         incidents,
         totalPages: Math.ceil(count / limit),
         currentPage: parseInt(page),
@@ -43,17 +63,93 @@ exports.getAllIncidents = asyncHandler(async (req, res) => {
 });
 
 /**
- * @desc    Get incidents near a location
+ * @desc    Get incidents from USGS source
+ * @route   GET /api/incidents/source/usgs
+ * @access  Public
+ */
+exports.getUSGSIncidents = asyncHandler(async (req, res) => {
+    try {
+        const usgsIncidents = await landslideDataService.fetchUSGSData();
+
+        res.json({
+            success: true,
+            source: 'USGS',
+            count: usgsIncidents.length,
+            incidents: usgsIncidents
+        });
+    } catch (error) {
+        logger.error(`Failed to fetch USGS incidents: ${error.message}`);
+        throw new ApiError('Failed to fetch USGS incidents', 500);
+    }
+});
+
+/**
+ * @desc    Get incidents from GSI source
+ * @route   GET /api/incidents/source/gsi
+ * @access  Public
+ */
+exports.getGSIIncidents = asyncHandler(async (req, res) => {
+    try {
+        const gsiIncidents = await landslideDataService.fetchGSIData();
+
+        res.json({
+            success: true,
+            source: 'GSI',
+            count: gsiIncidents.length,
+            incidents: gsiIncidents
+        });
+    } catch (error) {
+        logger.error(`Failed to fetch GSI incidents: ${error.message}`);
+        throw new ApiError('Failed to fetch GSI incidents', 500);
+    }
+});
+
+/**
+ * @desc    Get incidents from IIRS source
+ * @route   GET /api/incidents/source/iirs
+ * @access  Public
+ */
+exports.getIIRSIncidents = asyncHandler(async (req, res) => {
+    try {
+        const iirsIncidents = await landslideDataService.fetchIIRSData();
+
+        res.json({
+            success: true,
+            source: 'IIRS',
+            count: iirsIncidents.length,
+            incidents: iirsIncidents
+        });
+    } catch (error) {
+        logger.error(`Failed to fetch IIRS incidents: ${error.message}`);
+        throw new ApiError('Failed to fetch IIRS incidents', 500);
+    }
+});
+
+/**
+ * @desc    Get incidents near a location (from dynamic sources)
  * @route   GET /api/incidents/nearby
  * @access  Private
  */
 exports.getNearbyIncidents = asyncHandler(async (req, res) => {
-    const { lat, lng, radius = 50 } = req.query;
+    const { lat, lng, radius = 50, dynamic = false } = req.query;
 
     if (!lat || !lng) {
         throw new ApiError('Latitude and longitude are required', 400);
     }
 
+    // If dynamic flag is set, fetch from real sources
+    if (dynamic === 'true') {
+        const incidents = await landslideDataService.getNearbyIncidents(parseFloat(lat), parseFloat(lng), parseFloat(radius));
+
+        return res.json({
+            success: true,
+            source: 'dynamic',
+            count: incidents.length,
+            incidents
+        });
+    }
+
+    // Otherwise fetch from database
     const incidents = await HistoricalIncident.find({
         location: {
             $near: {
@@ -68,9 +164,23 @@ exports.getNearbyIncidents = asyncHandler(async (req, res) => {
 
     res.json({
         success: true,
+        source: 'database',
         count: incidents.length,
         incidents
     });
+});
+
+// Synthetic incident generation removed - all data should come from official APIs
+
+/**
+ * @desc    Get dynamic incidents (DEPRECATED - removed)
+ * Use /api/disasters/recent or /api/disasters/nearby instead
+ */
+exports.getDynamicIncidents = asyncHandler(async (req, res) => {
+    throw new ApiError(
+        'Dynamic incident generation removed. Use /api/disasters/recent or /api/disasters/nearby for real-time data.',
+        410
+    );
 });
 
 /**
@@ -219,4 +329,45 @@ exports.getIncidentStats = asyncHandler(async (req, res) => {
             recent: recentIncidents
         }
     });
+});
+
+/**
+ * @desc    Seed historical incidents dynamically from USGS, GSI, IIRS
+ * @route   POST /api/incidents/seed-test
+ * @access  Public
+ */
+exports.seedTestIncidents = asyncHandler(async (req, res) => {
+    try {
+        // Fetch dynamic incidents from real sources
+        const dynamicIncidents = await landslideDataService.getAllIncidents();
+
+        if (!dynamicIncidents || dynamicIncidents.length === 0) {
+            throw new ApiError('No incidents fetched from sources', 500);
+        }
+
+        // Transform to database format with incidentDate field
+        const formattedIncidents = dynamicIncidents.map(incident => ({
+            ...incident,
+            incidentDate: incident.date
+        }));
+
+        // Delete existing incidents to avoid duplicates
+        await HistoricalIncident.deleteMany({});
+
+        // Insert new dynamic incidents
+        const result = await HistoricalIncident.insertMany(formattedIncidents);
+
+        logger.info(`Seeded ${result.length} historical incidents from dynamic sources (USGS, GSI, IIRS)`);
+
+        res.json({
+            success: true,
+            message: 'Historical incidents seeded successfully from dynamic sources',
+            eventsCreated: result.length,
+            sources: ['USGS', 'GSI', 'IIRS'],
+            incidents: result.slice(0, 5) // Return first 5 for preview
+        });
+    } catch (error) {
+        logger.error(`Failed to seed historical incidents: ${error.message}`);
+        throw new ApiError('Failed to seed incidents', 500);
+    }
 });

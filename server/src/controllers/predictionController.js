@@ -63,12 +63,34 @@ async function createAlertIfNeeded(prediction, userId, latitude, longitude) {
 exports.getPrediction = asyncHandler(async (req, res) => {
     const { latitude, longitude } = req.body;
 
+    // === DEBUG: Log incoming coordinates ===
+    console.log('\n🔵 ========== BACKEND CONTROLLER ==========');
+    console.log('🔵 POST /api/predictions endpoint');
+    console.log(`🔵 Timestamp: ${new Date().toISOString()}`);
+    console.log(`🔵 User ID: ${req.user.id}`);
+    console.log(`🔵 Raw request.body:`, JSON.stringify(req.body));
+    console.log(`🔵 Extracted latitude: ${latitude} (type: ${typeof latitude})`);
+    console.log(`🔵 Extracted longitude: ${longitude} (type: ${typeof longitude})`);
+    console.log(`🔵 Valid number check - isFinite(lat): ${Number.isFinite(latitude)}, isFinite(lon): ${Number.isFinite(longitude)}`);
+    console.log(`🔵 Range check - lat in [-90,90]: ${latitude >= -90 && latitude <= 90}, lon in [-180,180]: ${longitude >= -180 && longitude <= 180}`);
+    // ========================================
+
     if (!latitude || !longitude) {
         throw new ApiError('Latitude and longitude are required', 400);
     }
 
     // Get integrated prediction (ML runs in backend process)
+    logger.info(`🔵 Calling integratedMLService.predict(${latitude}, ${longitude})`);
     const result = await integratedMLService.predict(latitude, longitude);
+
+    // Validate and sanitize confidence value
+    let confidence = result.prediction.confidence;
+    if (isNaN(confidence) || confidence === null || confidence === undefined) {
+        logger.warn(`Confidence is NaN, using fallback value for [${latitude}, ${longitude}]`);
+        confidence = 0.5; // Default confidence fallback
+    }
+    // Ensure confidence is between 0 and 1
+    confidence = Math.max(0, Math.min(1, confidence));
 
     // Store prediction in database
     const storedPrediction = new Prediction({
@@ -80,7 +102,7 @@ exports.getPrediction = asyncHandler(async (req, res) => {
         prediction: {
             riskLevel: result.prediction.riskLevel,
             probability: result.prediction.probability,
-            confidence: result.prediction.confidence
+            confidence: confidence
         },
         features: {
             // Map from result.breakdown to prediction features
@@ -113,7 +135,8 @@ exports.getPrediction = asyncHandler(async (req, res) => {
         success: true,
         prediction: {
             id: storedPrediction._id,
-            ...result.prediction
+            ...result.prediction,
+            confidence: confidence
         },
         breakdown: result.breakdown,
         metadata: result.metadata

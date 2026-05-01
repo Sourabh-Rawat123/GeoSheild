@@ -10,7 +10,8 @@
         "test:watch": "jest --watch",
         "lint": "eslint src --ext js",
         "lint:fix": "eslint src --ext js --fix",
-        "format": "prettier --write \"src/**/*.js\""
+        "format": "prettier --write \"src/**/*.js\"",
+        "init-indexes": "node scripts/initializeIndexes.js"
     },
     "keywords": [
         "geoshield",
@@ -23,9 +24,7 @@
     "dependencies": {
         "axios": "^1.6.2",
         "bcryptjs": "^2.4.3",
-        "compression": "^1.7.4",
         "cors": "^2.8.5",
-        "dayjs": "^1.11.10",
         "dotenv": "^16.3.1",
         "express": "^4.18.2",
         "express-mongo-sanitize": "^2.2.0",
@@ -35,13 +34,8 @@
         "joi": "^17.13.3",
         "jsonwebtoken": "^9.0.2",
         "mongoose": "^8.0.3",
-        "morgan": "^1.10.0",
-        "multer": "^1.4.5-lts.1",
         "node-cron": "^3.0.3",
         "python-shell": "^5.0.0",
-        "redis": "^4.6.11",
-        "socket.io": "^4.6.0",
-        "uuid": "^9.0.1",
         "winston": "^3.11.0"
     },
     "devDependencies": {

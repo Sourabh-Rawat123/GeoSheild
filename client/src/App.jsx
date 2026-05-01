@@ -14,6 +14,7 @@ import UserDashboard from '@pages/user/Dashboard'
 import RiskMap from '@pages/user/RiskMap'
 import Alerts from '@pages/user/Alerts'
 import RouteAnalysis from '@pages/user/RouteAnalysis'
+import RealTimeEvents from '@pages/user/RealTimeEvents'
 import Profile from '@pages/user/Profile'
 
 import NotFound from '@pages/NotFound'
@@ -49,6 +50,7 @@ function App() {
                 <Route path="/map" element={<Navigate to="/risk-map" replace />} />
                 <Route path="/alerts" element={<Alerts />} />
                 <Route path="/route-analysis" element={<RouteAnalysis />} />
+                <Route path="/real-time-events" element={<RealTimeEvents />} />
                 <Route path="/profile" element={<Profile />} />
             </Route>
 

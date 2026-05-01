@@ -1,18 +1,15 @@
 /**
  * Integrated ML Service
  * Combines API data (50%) + ML predictions (40%) + Historical CSV data (10%)
- * ML runs directly in backend process via Python script
+ * ML runs via FastAPI ml-service on port 8001 (NOT in-process Python)
  */
 
-const { PythonShell } = require('python-shell');
-const path = require('path');
 const weatherService = require('./weatherService');
+const mlServiceClient = require('./mlServiceClient');
 const logger = require('../utils/logger');
 
 class IntegratedMLService {
     constructor() {
-        this.pythonScriptPath = path.join(__dirname, '..', '..', 'ml', 'predict.py');
-
         // Weights for combining predictions (must sum to 1.0)
         this.weights = {
             api: parseFloat(process.env.API_WEIGHT || '0.50'),
@@ -29,7 +26,7 @@ class IntegratedMLService {
             this.weights.historical /= sum;
         }
 
-        logger.info('IntegratedMLService initialized', { weights: this.weights });
+        logger.info('IntegratedMLService initialized with ml-service', { weights: this.weights });
     }
 
     /**
@@ -37,10 +34,25 @@ class IntegratedMLService {
      */
     async predict(latitude, longitude) {
         try {
+            // === DEBUG: Log prediction start ===
+            console.log('\n🟠 ========== ML SERVICE ORCHESTRATOR ==========');
+            console.log(`🟠 predict() called with coordinates`);
+            console.log(`🟠 Timestamp: ${new Date().toISOString()}`);
+            console.log(`🟠 Latitude: ${latitude} (type: ${typeof latitude})`);
+            console.log(`🟠 Longitude: ${longitude} (type: ${typeof longitude})`);
+            console.log(`🟠 Hash of coordinates: ${JSON.stringify({ latitude, longitude })}`);
+            // ========================================
+
             logger.info('Starting integrated prediction', { latitude, longitude });
 
             // Step 1: Get API data (50% weight)
+            console.log(`🟠 Calling getAPIData(${latitude}, ${longitude})`);
             const apiData = await this.getAPIData(latitude, longitude);
+            console.log(`🟠 getAPIData returned:`, {
+                elevation: apiData.terrain.elevation,
+                rainfall24h: apiData.weather.rainfall24h,
+                earthquakeCount: apiData.seismic.count
+            });
             const apiScore = this.calculateAPIScore(apiData);
 
             // Step 2: Prepare features for ML
@@ -134,11 +146,19 @@ class IntegratedMLService {
      */
     async getAPIData(latitude, longitude) {
         try {
+            // === DEBUG: Log API data fetch ===
+            console.log(`🟠 getAPIData() called`);
+            console.log(`🟠   Latitude: ${latitude}`);
+            console.log(`🟠   Longitude: ${longitude}`);
+            // ===================================
+
             const [weather, seismic, elevation] = await Promise.all([
                 weatherService.getCurrentWeather(latitude, longitude),
                 weatherService.getEarthquakeData(latitude, longitude, 100),
                 weatherService.getElevationData(latitude, longitude)
             ]);
+
+            console.log(`🟠 All APIs called successfully. Returning data for [${latitude}, ${longitude}]`);
 
             return {
                 weather: {
@@ -160,6 +180,7 @@ class IntegratedMLService {
                 }
             };
         } catch (error) {
+            console.error(`🟠 API data fetch failed:`, error.message);
             logger.warn('API data fetch failed, using defaults', { error: error.message });
             // Return default values if APIs fail
             return {
@@ -230,79 +251,17 @@ class IntegratedMLService {
     }
 
     /**
-     * Run ML prediction using Python script
+     * Run ML prediction using ml-service REST API
      */
     async runMLPrediction(latitude, longitude, features) {
-        return new Promise((resolve, reject) => {
-            const options = {
-                mode: 'text',  // Changed from 'json' to 'text' to avoid double-parsing
-                pythonPath: process.env.PYTHON_PATH || 'python',
-                pythonOptions: ['-u'],
-                scriptPath: path.dirname(this.pythonScriptPath),
-                args: []
-            };
-
-            const pyshell = new PythonShell('predict.py', options);
-
-            // Send input data to Python script
-            const inputData = {
-                latitude,
-                longitude,
-                features
-            };
-
-            // Send as JSON string - Python will parse it
-            pyshell.send(JSON.stringify(inputData));
-
-            let result = null;
-            let stderrOutput = [];
-
-            pyshell.on('message', (message) => {
-                // In text mode, manually parse JSON response
-                try {
-                    result = JSON.parse(message);
-                } catch (e) {
-                    logger.warn('Failed to parse Python response as JSON', { message, error: e.message });
-                    result = message;
-                }
-            });
-
-            // Capture stderr for debugging but don't treat [DEBUG] as errors
-            pyshell.on('stderr', (stderr) => {
-                const line = stderr.toString();
-                stderrOutput.push(line);
-                // Only log non-DEBUG messages as warnings
-                if (!line.startsWith('[DEBUG]')) {
-                    logger.warn('Python stderr', { message: line });
-                }
-            });
-
-            pyshell.end((err) => {
-                if (err) {
-                    // Filter out [DEBUG] messages from error
-                    const errorMsg = err.message.split('\n')
-                        .filter(line => !line.includes('[DEBUG]'))
-                        .join('\n')
-                        .trim();
-
-                    if (errorMsg) {
-                        logger.error('Python ML script failed', { error: errorMsg });
-                        reject(new Error(`ML prediction failed: ${errorMsg}`));
-                    } else {
-                        // All errors were just DEBUG messages, no real error
-                        if (!result) {
-                            reject(new Error('ML prediction returned no data'));
-                        } else {
-                            resolve(result);
-                        }
-                    }
-                } else if (!result) {
-                    reject(new Error('ML prediction returned no data'));
-                } else {
-                    resolve(result);
-                }
-            });
-        });
+        try {
+            // Call ml-service via REST API instead of subprocess
+            const mlResult = await mlServiceClient.predictSingle(latitude, longitude, features);
+            return mlResult;
+        } catch (error) {
+            logger.error('ML Service prediction failed', { error: error.message });
+            throw error;
+        }
     }
 
     /**
@@ -328,23 +287,83 @@ class IntegratedMLService {
     }
 
     /**
-     * Calculate overall confidence
+     * Calculate overall confidence with robust NaN prevention
+     * Returns valid number 0-1, fallback to 0.5 if all sources invalid
      */
     calculateOverallConfidence(apiData, mlData) {
-        // API confidence (based on data completeness)
-        const apiConfidence = (apiData.weather.rainfall72h !== undefined &&
-            apiData.seismic.count !== undefined) ? 0.8 : 0.5;
+        try {
+            // Validate and sanitize API confidence
+            let apiConfidence = 0.5; // default fallback
+            if (apiData &&
+                Number.isFinite(apiData.weather?.rainfall72h) &&
+                Number.isFinite(apiData.seismic?.count)) {
+                apiConfidence = 0.8;
+            }
 
-        // ML confidence from model
-        const mlConfidence = mlData.ml_result.confidence || 0.5;
+            // Validate and sanitize ML confidence
+            let mlConfidence = 0.5; // default fallback
+            if (mlData &&
+                mlData.ml_result &&
+                Number.isFinite(mlData.ml_result.confidence) &&
+                mlData.ml_result.confidence >= 0 &&
+                mlData.ml_result.confidence <= 1) {
+                mlConfidence = mlData.ml_result.confidence;
+            } else if (mlData?.ml_result?.confidence !== undefined) {
+                logger.warn('ML confidence is invalid', {
+                    received: mlData.ml_result.confidence,
+                    type: typeof mlData.ml_result.confidence
+                });
+            }
 
-        // Historical confidence (based on data availability)
-        const historicalConfidence = mlData.historical_score > 0 ? 0.7 : 0.5;
+            // Validate and sanitize historical confidence
+            let historicalConfidence = 0.5; // default fallback
+            const historicalScore = mlData?.historical_score;
+            if (Number.isFinite(historicalScore) && historicalScore > 0) {
+                historicalConfidence = 0.7;
+            }
 
-        // Weighted average
-        return (apiConfidence * this.weights.api +
-            mlConfidence * this.weights.ml +
-            historicalConfidence * this.weights.historical);
+            // Validate weights sum to avoid division by zero
+            const weightSum = this.weights.api + this.weights.ml + this.weights.historical;
+            if (!Number.isFinite(weightSum) || weightSum <= 0) {
+                logger.error('Invalid weight sum detected', { weightSum });
+                return 0.5; // fallback
+            }
+
+            // Calculate weighted average with safe arithmetic
+            const weightedSum =
+                (apiConfidence * this.weights.api) +
+                (mlConfidence * this.weights.ml) +
+                (historicalConfidence * this.weights.historical);
+
+            // Validate result is finite
+            if (!Number.isFinite(weightedSum)) {
+                logger.warn('Weighted confidence calculation resulted in NaN', {
+                    apiConfidence,
+                    mlConfidence,
+                    historicalConfidence,
+                    weights: this.weights
+                });
+                return 0.5; // fallback
+            }
+
+            // Ensure result is in valid range [0, 1]
+            const finalConfidence = Math.max(0, Math.min(1, weightedSum));
+
+            logger.debug('Confidence calculated', {
+                api: apiConfidence,
+                ml: mlConfidence,
+                historical: historicalConfidence,
+                final: finalConfidence
+            });
+
+            return finalConfidence;
+
+        } catch (error) {
+            logger.error('Error calculating confidence, using fallback', {
+                error: error.message
+            });
+            return 0.5; // ultimate fallback
+        }
     }
 }
 

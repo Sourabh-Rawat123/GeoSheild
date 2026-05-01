@@ -1,13 +1,18 @@
 import { useState, useEffect, useRef } from 'react';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-routing-machine/dist/leaflet-routing-machine.css';
 import 'leaflet-routing-machine';
 import axios from 'axios';
+import { setSelectedRoute, setRoutePredictions, setRouteIncidents } from '@features/routes/routeSlice';
+import toast from 'react-hot-toast';
 
 const RouteAnalysis = () => {
     const { user } = useSelector((state) => state.auth);
+    const dispatch = useDispatch();
+    const navigate = useNavigate();
     const [origin, setOrigin] = useState('');
     const [destination, setDestination] = useState('');
     const [analyzing, setAnalyzing] = useState(false);
@@ -113,31 +118,128 @@ const RouteAnalysis = () => {
                     coordinates: routeCoords
                 });
 
-                // Fetch predictions and analyze route risk
+                // Sample points along route for prediction (every 5km or fewer for short routes)
+                const sampleDistance = 5000; // 5km
+                const totalDistance = summary.totalDistance;
+                const numSamples = Math.max(3, Math.ceil(totalDistance / sampleDistance));
+                const sampledCoords = [];
+
+                console.log('\n🟢 ========== FRONTEND ROUTE ANALYSIS ==========');
+                console.log(`🟢 Route analysis started`);
+                console.log(`🟢 Total distance: ${totalDistance}m, Sampling ${numSamples} points`);
+
+                for (let i = 0; i < numSamples; i++) {
+                    const index = Math.floor((i / numSamples) * (routeCoords.length - 1));
+                    sampledCoords.push(routeCoords[index]);
+                }
+
+                console.log(`🟢 Sampled coordinates:`, sampledCoords.map((c, i) => `[${i}] (${c.lat.toFixed(4)}, ${c.lng.toFixed(4)})`).join(' | '));
+
+                // Get predictions for sampled points
                 const token = localStorage.getItem('token');
-                const predictions = await axios.get(`${API_URL}/predictions/active`, {
-                    params: {
-                        lat: (originCoords.lat + destCoords.lat) / 2,
-                        lon: (originCoords.lon + destCoords.lon) / 2,
-                        radius: 200
-                    },
-                    headers: { Authorization: `Bearer ${token}` }
+                const predictionsPromises = sampledCoords.map((coord, index) => {
+                    console.log(`🟢 Sending request ${index}/${sampledCoords.length}`);
+                    console.log(`🟢   Timestamp: ${new Date().toISOString()}`);
+                    console.log(`🟢   Latitude: ${coord.lat} (type: ${typeof coord.lat})`);
+                    console.log(`🟢   Longitude: ${coord.lng} (type: ${typeof coord.lng})`);
+                    console.log(`🟢   Request body: { latitude: ${coord.lat}, longitude: ${coord.lng} }`);
+
+                    return axios.post(`${API_URL}/predictions`, {
+                        latitude: coord.lat,
+                        longitude: coord.lng
+                    }, {
+                        headers: { Authorization: `Bearer ${token}` }
+                    }).then(response => {
+                        console.log(`🟢 Response received for [${coord.lat}, ${coord.lng}]:`, {
+                            riskLevel: response.data.prediction.riskLevel,
+                            probability: (response.data.prediction.probability * 100).toFixed(1) + '%'
+                        });
+                        return response;
+                    }).catch(err => {
+                        console.error(`🟢 ❌ Prediction failed for [${coord.lat}, ${coord.lng}]`, err.message);
+                        return null;
+                    })
                 });
 
-                const riskZones = analyzeRouteRisk(routeCoords, predictions.data.predictions || []);
+                const predictions = await Promise.all(predictionsPromises);
+                const successfulPredictions = predictions.filter(p => p !== null);
+
+                console.log(`🟢 Received ${successfulPredictions.length}/${sampledCoords.length} predictions`);
+                console.log(`🟢 Risk analysis:`, successfulPredictions.map((p, i) => ({
+                    point: i,
+                    coords: [sampledCoords[i].lat, sampledCoords[i].lng],
+                    risk: p.data.prediction.riskLevel,
+                    prob: (p.data.prediction.probability * 100).toFixed(1) + '%'
+                })));
+
+                // Analyze route risk from predictions
+                const routePredictions = successfulPredictions.map((p, i) => ({
+                    location: {
+                        coordinates: [sampledCoords[i].lng, sampledCoords[i].lat]
+                    },
+                    prediction: {
+                        riskLevel: p.data.prediction.riskLevel,
+                        probability: p.data.prediction.probability
+                    }
+                }));
+
+                const riskZones = analyzeRouteRisk(routeCoords, routePredictions);
                 setRiskAnalysis(riskZones);
 
-                // Add risk markers
-                riskZones.highRiskPoints.forEach(point => {
-                    L.circleMarker([point.lat, point.lon], {
-                        radius: 8,
-                        fillColor: '#ef4444',
+                // Save route to Redux for Risk Map
+                dispatch(setSelectedRoute({
+                    origin,
+                    destination,
+                    originCoords: { lat: originCoords.lat, lon: originCoords.lon },
+                    destCoords: { lat: destCoords.lat, lon: destCoords.lon },
+                    routeCoords: routeCoords,
+                    distance: parseFloat((summary.totalDistance / 1000).toFixed(2)),
+                    duration: Math.round(summary.totalTime / 60)
+                }));
+
+                dispatch(setRoutePredictions(routePredictions));
+
+                // Fetch historical incidents along route
+                try {
+                    const incidentsResponse = await axios.get(`${API_URL}/predictions/historical`, {
+                        params: {
+                            lat: (originCoords.lat + destCoords.lat) / 2,
+                            lon: (originCoords.lon + destCoords.lon) / 2,
+                            radius: 200
+                        },
+                        headers: { Authorization: `Bearer ${token}` }
+                    });
+                    dispatch(setRouteIncidents(incidentsResponse.data.incidents || []));
+                } catch (err) {
+                    console.warn('Failed to fetch route incidents:', err);
+                    dispatch(setRouteIncidents([]));
+                }
+
+                toast.success('Route saved! You can view it on the Risk Map.', { duration: 4000 });
+
+                // Add risk markers for sampled predictions
+                successfulPredictions.forEach((p, i) => {
+                    const riskLevel = p.data.prediction.riskLevel;
+                    const probability = p.data.prediction.probability;
+                    const color = riskLevel === 'Severe' ? '#ef4444' :
+                        riskLevel === 'High' ? '#f97316' :
+                            riskLevel === 'Moderate' ? '#eab308' : '#22c55e';
+
+                    L.circleMarker([sampledCoords[i].lat, sampledCoords[i].lng], {
+                        radius: 10,
+                        fillColor: color,
                         color: '#fff',
-                        weight: 2,
+                        weight: 3,
                         opacity: 1,
-                        fillOpacity: 0.7
+                        fillOpacity: 0.8
                     }).addTo(mapInstanceRef.current)
-                        .bindPopup(`<strong>⚠️ High Risk Zone</strong><br/>Risk Level: ${point.riskLevel}<br/>Distance from route: ${point.distance}m`);
+                        .bindPopup(`
+                            <div class="p-2">
+                                <strong>📊 Route Risk Point</strong><br/>
+                                Risk Level: <span style="color: ${color}; font-weight: bold;">${riskLevel}</span><br/>
+                                Probability: ${(probability * 100).toFixed(1)}%
+                            </div>
+                        `);
                 });
             });
 
@@ -180,49 +282,61 @@ const RouteAnalysis = () => {
         const highRiskPoints = [];
         const moderateRiskPoints = [];
         let maxRisk = 'Low';
-        let totalRiskScore = 0;
+        let maxProbability = 0;
+        let totalProbability = 0;
+        let riskCount = 0;
 
-        predictions.forEach(pred => {
+        predictions.forEach((pred, idx) => {
             if (!pred.location?.coordinates) return;
 
             const [predLon, predLat] = pred.location.coordinates;
             const riskLevel = pred.prediction.riskLevel;
+            const probability = pred.prediction.probability;
 
-            routeCoords.forEach(coord => {
-                const distance = getDistance(predLat, predLon, coord.lat, coord.lng);
+            totalProbability += probability;
+            riskCount++;
+            maxProbability = Math.max(maxProbability, probability);
 
-                if (distance < 5000) { // Within 5km
-                    const point = {
-                        lat: predLat,
-                        lon: predLon,
-                        riskLevel,
-                        distance: Math.round(distance)
-                    };
+            // Update max risk level
+            const riskRanking = { 'Low': 1, 'Moderate': 2, 'High': 3, 'Severe': 4 };
+            if (riskRanking[riskLevel] > riskRanking[maxRisk]) {
+                maxRisk = riskLevel;
+            }
 
-                    if (riskLevel === 'High' || riskLevel === 'Severe') {
-                        highRiskPoints.push(point);
-                        totalRiskScore += riskLevel === 'Severe' ? 100 : 75;
-                        if (riskLevel === 'Severe' || maxRisk !== 'Severe') {
-                            maxRisk = riskLevel;
-                        }
-                    } else if (riskLevel === 'Moderate') {
-                        moderateRiskPoints.push(point);
-                        totalRiskScore += 50;
-                        if (maxRisk === 'Low') maxRisk = 'Moderate';
-                    }
-                }
-            });
+            const point = {
+                lat: predLat,
+                lon: predLon,
+                riskLevel,
+                probability,
+                distance: 0 // Distance from route will be calculated if needed
+            };
+
+            if (riskLevel === 'High' || riskLevel === 'Severe') {
+                highRiskPoints.push(point);
+            } else if (riskLevel === 'Moderate') {
+                moderateRiskPoints.push(point);
+            }
         });
 
-        const avgRiskScore = routeCoords.length > 0 ? totalRiskScore / routeCoords.length : 0;
+        const avgProbability = riskCount > 0 ? totalProbability / riskCount : 0;
+        const avgRiskScore = avgProbability * 100;
+
+        // Determine safety rating based on statistics
+        let safetyRating = 'Safe';
+        if (maxProbability > 0.75) safetyRating = 'Dangerous';
+        else if (maxProbability > 0.6 || highRiskPoints.length > 0) safetyRating = 'Risky';
+        else if (maxProbability > 0.4 || moderateRiskPoints.length > 0) safetyRating = 'Moderate';
 
         return {
             highRiskPoints,
             moderateRiskPoints,
             maxRisk,
-            totalRiskScore,
+            maxProbability: (maxProbability * 100).toFixed(1),
+            avgProbability: (avgProbability * 100).toFixed(1),
+            totalRiskScore: (avgProbability * 100).toFixed(2),
             avgRiskScore: avgRiskScore.toFixed(2),
-            safetyRating: avgRiskScore < 10 ? 'Safe' : avgRiskScore < 30 ? 'Moderate' : avgRiskScore < 60 ? 'Risky' : 'Dangerous'
+            safetyRating,
+            predictionsCount: riskCount
         };
     };
 
@@ -480,8 +594,8 @@ const RouteAnalysis = () => {
                                     <p className="text-xl font-bold">{riskAnalysis.maxRisk}</p>
                                 </div>
                                 <div className="bg-white/10 rounded-lg p-4 text-center">
-                                    <p className="text-xs text-white/70 mb-1">Avg Score</p>
-                                    <p className="text-xl font-bold">{riskAnalysis.avgRiskScore}</p>
+                                    <p className="text-xs text-white/70 mb-1">Peak Probability</p>
+                                    <p className="text-xl font-bold">{riskAnalysis.maxProbability}%</p>
                                 </div>
                                 <div className="bg-white/10 rounded-lg p-4 text-center">
                                     <p className="text-xs text-white/70 mb-1">Distance</p>
@@ -492,7 +606,7 @@ const RouteAnalysis = () => {
                     </div>
 
                     {/* Stats Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 hover:shadow-2xl transition-shadow">
                             <div className="flex items-center justify-between mb-4">
                                 <h3 className="text-lg font-bold text-gray-900 dark:text-white">
@@ -504,6 +618,20 @@ const RouteAnalysis = () => {
                                 <InfoRow label="Distance" value={`${routeData.distance} km`} />
                                 <InfoRow label="Duration" value={`${routeData.duration} min`} />
                                 <InfoRow label="Waypoints" value={routeData.coordinates.length.toString()} />
+                            </div>
+                        </div>
+
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 hover:shadow-2xl transition-shadow">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                                    Risk Assessment
+                                </h3>
+                                <span className="text-3xl">📊</span>
+                            </div>
+                            <div className="space-y-3">
+                                <InfoRow label="Max Probability" value={`${riskAnalysis.maxProbability}%`} />
+                                <InfoRow label="Avg Probability" value={`${riskAnalysis.avgProbability}%`} />
+                                <InfoRow label="Points Checked" value={riskAnalysis.predictionsCount.toString()} />
                             </div>
                         </div>
 

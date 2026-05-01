@@ -12,26 +12,31 @@ const UserDashboard = () => {
     const { user } = useSelector((state) => state.auth);
     const { currentPrediction, isLoading } = useSelector((state) => state.predictions);
     const [requestingLocation, setRequestingLocation] = useState(false);
+    const [manualLat, setManualLat] = useState('');
+    const [manualLon, setManualLon] = useState('');
+    const [showManualInput, setShowManualInput] = useState(false);
 
     useEffect(() => {
+
         if (user?.location?.coordinates &&
             Array.isArray(user.location.coordinates) &&
             user.location.coordinates.length === 2 &&
             user.location.coordinates[0] &&
             user.location.coordinates[1]) {
             const [lon, lat] = user.location.coordinates;
-            console.log('Dashboard: Fetching prediction for:', { lat, lon, location: user.location });
+           
 
             // Extra validation to ensure lat/lon are valid numbers
             if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+               
                 dispatch(fetchSinglePrediction({ latitude: lat, longitude: lon }));
             } else {
-                console.error('Dashboard: Invalid coordinates:', { lat, lon });
+               
             }
         } else {
-            console.log('Dashboard: No valid location set in user profile', user?.location);
+          
         }
-    }, [dispatch, user?.location?.coordinates]);
+    }, [dispatch, user?.location?.coordinates?.[0], user?.location?.coordinates?.[1]]);
 
     const handleSetLocation = async () => {
         if (!navigator.geolocation) {
@@ -50,6 +55,7 @@ const UserDashboard = () => {
                     toast.dismiss('location-request');
                     toast.error('Location access denied. To enable:\n1. Click the 🔒 icon in address bar\n2. Allow Location\n3. Refresh this page', { duration: 8000 });
                     setRequestingLocation(false);
+                    setShowManualInput(true); // Show manual input as fallback
                     return;
                 }
             } catch (err) {
@@ -100,8 +106,10 @@ const UserDashboard = () => {
 
                 if (error.code === 1) {
                     toast.error('Location access denied. To enable:\n1. Click the 🔒 icon in address bar\n2. Allow Location\n3. Try again', { duration: 8000 });
+                    setShowManualInput(true); // Show manual input as fallback
                 } else if (error.code === 2) {
                     toast.error('Location unavailable. Please check your device settings.');
+                    setShowManualInput(true); // Show manual input as fallback
                 } else if (error.code === 3) {
                     toast.error('Location request timed out. Please try again.');
                 } else {
@@ -111,6 +119,51 @@ const UserDashboard = () => {
             },
             { timeout: 20000, enableHighAccuracy: true, maximumAge: 0 }
         );
+    };
+
+    const handleManualLocation = async () => {
+        const lat = parseFloat(manualLat);
+        const lon = parseFloat(manualLon);
+
+        if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+            toast.error('Invalid coordinates. Latitude: -90 to 90, Longitude: -180 to 180');
+            return;
+        }
+
+        try {
+            toast.loading('Setting location...', { id: 'manual-location' });
+
+            // Reverse geocode
+            const response = await fetch(
+                `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`,
+                { headers: { 'User-Agent': 'GeoShield-App' } }
+            );
+            const data = await response.json();
+
+            const city = data.address?.city || data.address?.town || data.address?.village || 'Unknown';
+            const state = data.address?.state || 'Unknown';
+            const address = data.display_name || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+
+            // Update profile
+            const updatedUser = await authService.updateProfile({
+                location: {
+                    type: 'Point',
+                    coordinates: [lon, lat],
+                    address,
+                    city,
+                    state,
+                },
+            });
+
+            dispatch(updateUser(updatedUser));
+            toast.success(`Location set: ${city}, ${state}`, { id: 'manual-location' });
+            setShowManualInput(false);
+            setManualLat('');
+            setManualLon('');
+        } catch (err) {
+            console.error('Failed to set location:', err);
+            toast.error('Failed to set location. Please try again.');
+        }
     };
 
     const getRiskIcon = (level) => {
@@ -226,27 +279,92 @@ const UserDashboard = () => {
                     <p className="text-gray-600 dark:text-gray-400 mb-6">
                         Allow location access to start monitoring landslide risks
                     </p>
-                    <button
-                        onClick={handleSetLocation}
-                        disabled={requestingLocation}
-                        className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {requestingLocation ? '⏳ Requesting Location...' : '📍 Allow Location Access'}
-                    </button>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-4">
-                        Or set it manually in{' '}
-                        <button
-                            onClick={() => navigate('/profile')}
-                            className="text-blue-600 hover:text-blue-700 underline"
-                        >
-                            Profile
-                        </button>
-                    </p>
+
+                    {!showManualInput ? (
+                        <>
+                            <button
+                                onClick={handleSetLocation}
+                                disabled={requestingLocation}
+                                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {requestingLocation ? '⏳ Requesting Location...' : '📍 Allow Location Access'}
+                            </button>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-4">
+                                Or{' '}
+                                <button
+                                    onClick={() => setShowManualInput(true)}
+                                    className="text-blue-600 hover:text-blue-700 underline font-semibold"
+                                >
+                                    enter coordinates manually
+                                </button>
+                                {' '}or set it in{' '}
+                                <button
+                                    onClick={() => navigate('/profile')}
+                                    className="text-blue-600 hover:text-blue-700 underline font-semibold"
+                                >
+                                    Profile
+                                </button>
+                            </p>
+                        </>
+                    ) : (
+                        <div className="max-w-md mx-auto">
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                        Latitude (-90 to 90)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        step="0.0001"
+                                        min="-90"
+                                        max="90"
+                                        value={manualLat}
+                                        onChange={(e) => setManualLat(e.target.value)}
+                                        placeholder="e.g., 30.3165"
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                        Longitude (-180 to 180)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        step="0.0001"
+                                        min="-180"
+                                        max="180"
+                                        value={manualLon}
+                                        onChange={(e) => setManualLon(e.target.value)}
+                                        placeholder="e.g., 78.0322"
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+                                    />
+                                </div>
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={handleManualLocation}
+                                        className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold"
+                                    >
+                                        ✓ Set Location
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setShowManualInput(false);
+                                            setManualLat('');
+                                            setManualLon('');
+                                        }}
+                                        className="flex-1 px-4 py-2 bg-gray-400 text-white rounded-lg hover:bg-gray-500 transition-colors font-semibold"
+                                    >
+                                        ✕ Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
             {/* Quick Action Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <ActionCard
                     icon="🗺️"
                     title="Risk Map"
@@ -260,6 +378,13 @@ const UserDashboard = () => {
                     description="Check your travel route"
                     onClick={() => navigate('/route-analysis')}
                     color="bg-gradient-to-br from-blue-500 to-blue-700"
+                />
+                <ActionCard
+                    icon="🌍"
+                    title="Real-Time Events"
+                    description="Live landslide tracking"
+                    onClick={() => navigate('/real-time-events')}
+                    color="bg-gradient-to-br from-red-500 to-orange-700"
                 />
                 <ActionCard
                     icon="🔔"

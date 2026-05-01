@@ -85,12 +85,42 @@ export const checkSeedStatus = async () => {
     }
 };
 
+// Get dynamic historical incidents based on location
+export const getDynamicIncidents = async (lat, lon, radius = 100) => {
+    try {
+        const response = await axios.get(`${API_URL}/incidents/dynamic`, {
+            params: { lat, lon, radius },
+            headers: getAuthHeader()
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Failed to fetch dynamic incidents:', error);
+        return { incidents: [] };
+    }
+};
+
+// Get real-time disaster events (unified: NASA EONET + ReliefWeb)
+export const getRealTimeEvents = async (lat, lon, radius = 500) => {
+    try {
+        const response = await axios.get(`${API_URL}/disasters/nearby`, {
+            params: { lat, lon, radius },
+            headers: getAuthHeader()
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Failed to fetch real-time events:', error);
+        return { events: [] };
+    }
+};
+
 export default {
     getActivePredictions,
     getHistoricalIncidents,
+    getDynamicIncidents,
     getCurrentWeather,
     getRainfallAlert,
     storePrediction,
     seedHistoricalData,
-    checkSeedStatus
+    checkSeedStatus,
+    getRealTimeEvents
 };
